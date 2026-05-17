@@ -93,7 +93,7 @@ ws://localhost:8000/ws?api_key=YOUR_KEY
 
 ---
 
-### 2-4. `ping` — 연결 유지
+### 2-4. `ping` — 연결 유지 (Deprecated for client use)
 
 ```json
 {
@@ -101,7 +101,12 @@ ws://localhost:8000/ws?api_key=YOUR_KEY
 }
 ```
 
-서버는 즉시 `pong`으로 응답한다. Android는 30초 간격으로 전송 권장.
+서버는 수신 시 즉시 `pong`으로 응답한다.
+
+> **Android 클라이언트는 이 JSON ping을 송신하지 않는다 (v1.1.0~).**
+> 대신 OkHttp `pingInterval(20s)`로 프로토콜 레벨 WebSocket PING 프레임(opcode 0x9)을 사용. 이는 Android 네트워크 레이어에서 처리되어 Doze/App Standby에서도 동작하며, 서버(uvicorn/Starlette)가 자동으로 PONG으로 응답한다. 상세는 `05_websocket_keepalive_fix.md`.
+>
+> 본 JSON ping은 향후 서버 측 keepalive가 필요해질 경우(예: Cloud Run에서 클라이언트 health 확인)를 위한 양방향 양식으로 스펙에 남겨둔다.
 
 ---
 
@@ -327,3 +332,4 @@ async def handle_text_input(websocket: WebSocket, text: str):
 | 버전 | 날짜 | 변경 내용 |
 |---|---|---|
 | 1.0 | 2026-05-16 | 최초 작성. TTS 단말 처리 정책 반영. |
+| 1.1 | 2026-05-17 | §2-4 `ping`: Android 클라이언트는 JSON ping 미사용. OkHttp 프로토콜 레벨 PING으로 전환 (05_websocket_keepalive_fix.md). |

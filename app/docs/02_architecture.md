@@ -1,4 +1,4 @@
-# 기술 아키텍처 및 구현 가이드 - v1.1
+# 기술 아키텍처 및 구현 가이드 - v1.2
 
 ## 1. 핵심 아키텍처 원칙: 의존성 역전 (DIP)
 - **UI 및 ViewModel은 절대 구체적인 데이터 소스(Mock 클래스 등)를 직접 참조해서는 안 된다.**
@@ -18,8 +18,13 @@
 - **현재 단계 (`MockAiRepository.kt`):**
     - `AiRepository` 인터페이스를 상속받아 가짜 비즈니스 로직을 구현한다.
     - 내부적으로 `delay()`를 활용하여 네트워크 딜레이를 정밀하게 묘사하고, 타이핑 효과를 위해 단어/글자 단위로 `emit()`을 발생시키는 코루틴 Flow를 구현한다.
-- **향후 단계 (`RemoteAiRepository.kt`):**
-    - 서버 개발 완료 시 이 파일만 새로 생성하여 WebSocket 통신 로직을 구현할 예정.
+- **Phase 1 (`RemoteAiRepository.kt`) — 구현 완료 (2026-05-17):**
+    - OkHttp WebSocket 클라이언트로 `text_input` 송신 / `text_chunk` 수신 / `text_done`에서 Flow 종료. 통신 규격은 `03_server_api.md` 참조.
+    - 세션 단위 연결 유지로 서버측 멀티턴 히스토리 보존. `connectionMutex`로 직렬화.
+    - **Keepalive**: OkHttp `pingInterval(20s)` 프로토콜 레벨 PING. 앱 레벨 JSON ping 미사용. 상세 `05_websocket_keepalive_fix.md`.
+    - **백그라운드 재연결**: `ProcessLifecycleOwner.ON_START` 옵저버 + `@Volatile isConnectionAlive` 플래그. OS가 백그라운드에서 소켓을 abort해도 foreground 복귀 시 자동 재연결. 단, 멀티턴 히스토리는 서버측 메모리이므로 새 세션은 초기화됨 (spec 동작).
+    - **JSON 직렬화**: `Json { encodeDefaults = true }`. default value 필드(`TextInput.type = "text_input"`)가 누락되지 않도록 필수.
+- **Phase 2 (예정):** `streamAudio` 본체 구현, Gemini Live API 모델 전환, 서버 측 PCM 청크 처리. 현재 `UnsupportedOperationException` 던지는 스텁만 존재.
 
 ### 2.3 UI & Presentation Layer (Jetpack Compose & ViewModel)
 - `ChatViewModel`은 생성자 파라미터로 오직 `AiRepository` 인터페이스만 주입(Inject)받는다.

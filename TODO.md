@@ -28,12 +28,26 @@
 
 ## 아키텍처/Phase 2 준비
 
-### 3. `RemoteAiRepository` 스캐폴딩
-- **목적:** 실제 Gemini Live(WebSocket) 백엔드 연동 진입점을 미리 정의해 두기. 구현 본체는 서버 준비 후 채움.
-- **작업:**
-  - `data/repository/RemoteAiRepository.kt` 빈 클래스 생성 (현재는 미사용, `@Suppress` 또는 `TODO()` 본문).
-  - `DefaultAppContainer` 에 `BuildConfig.USE_REMOTE` 플래그 분기 추가 (default false → Mock 유지).
-  - `streamAudio` 의 입력/출력 시그니처 검토. 현재 인터페이스: `streamAudio(audioFlow: Flow<ByteArray>): Flow<AiResponse>` — Live API와 정합한지 재확인 필요.
+### 3. `RemoteAiRepository` 스캐폴딩 — ✅ 완료 (2026-05-17)
+- **결과:**
+  - `data/repository/RemoteAiRepository.kt` 구현 (OkHttp WebSocket, 세션 유지, READY 대기, `text_chunk` 라우팅, `text_done`에서 Flow 종료).
+  - `DefaultAppContainer`가 `BuildConfig.USE_REMOTE`로 분기 (default false → Mock).
+  - `app/build.gradle.kts`에 BuildConfig 필드(`USE_REMOTE` / `SERVER_URL` / `WS_API_KEY`) + kotlinx-serialization 플러그인 + okhttp/serialization 의존성 추가.
+  - `AndroidManifest.xml`에 `INTERNET` 권한 + `android:usesCleartextTraffic="true"` (개발 LAN 접속용 — 운영 전환 시 `wss://`로 교체하고 cleartext 해제).
+- **Phase 1 end-to-end 검증 (2026-05-17):**
+  - **클라이언트 버그 수정 — `kotlinx.serialization` `encodeDefaults = true`**: default value를 가진 필드(`TextInput.type = "text_input"`)가 직렬화 시 누락되어 서버가 `Unknown type: None`을 반환하던 문제. 이 fix 없이 클라이언트는 한 번도 정상 동작한 적이 없었음 (서버 단독 smoke test는 Python `ws_smoke.py`로 통과한 상태였음).
+  - **WebSocket keepalive 강화**: `pingInterval(20s)` 프로토콜 레벨 PING + 코루틴 JSON ping 제거. 상세는 `app/docs/05_websocket_keepalive_fix.md`.
+  - **백그라운드 재진입 자동 재연결**: Samsung One UI가 화면 OFF 시 소켓을 강제 abort하므로 `pingInterval`만으로 부족. `ProcessLifecycleOwner` `ON_START` 옵저버로 foreground 복귀 시 자동 reconnect. `@Volatile isConnectionAlive` 플래그로 좀비 소켓 정확히 감지. `lifecycle-process` 의존성 추가.
+- **잔여:**
+  - `streamAudio`는 `UnsupportedOperationException("Phase 2")`. Live 오디오 인입 시 시그니처 재검토는 항목 4와 함께.
+  - 진단용 `Log.i` 인바운드/송신 로그가 운영 시 노이즈가 될 수 있음 — Phase 2 진입 전 `BuildConfig.DEBUG` 가드 또는 Timber 도입 검토.
+- **사용법:** `local.properties`에 아래 3줄 추가 후 리빌드.
+  ```properties
+  USE_REMOTE=true
+  SERVER_URL=ws://10.0.2.2:8000/ws
+  WS_API_KEY=<서버 .env의 WS_API_KEY와 동일 값>
+  ```
+- **상세 핸드오프:** `app/docs/04_server_handoff.md`, `app/docs/05_websocket_keepalive_fix.md`.
 
 ### 4. 서버용 `VoiceController` 추상화 검토
 - 현재 `VoiceController` 인터페이스는 디바이스 로컬 STT/TTS를 전제. 서버가 audio in/out을 직접 처리하는 Live 모드로 가면 인터페이스 분리(`LocalVoiceController` vs `StreamingVoiceController`) 가 필요할 수 있음.
