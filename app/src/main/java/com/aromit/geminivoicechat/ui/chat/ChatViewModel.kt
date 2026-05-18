@@ -11,7 +11,6 @@ import com.aromit.geminivoicechat.ui.voice.VoiceController
 import com.aromit.geminivoicechat.ui.voice.VoiceEvent
 import com.aromit.geminivoicechat.ui.voice.VoiceMode
 import com.aromit.geminivoicechat.ui.voice.VoiceState
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,7 +25,11 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatState())
     val state: StateFlow<ChatState> = _state.asStateFlow()
 
-    private var voiceEventsJob: Job? = null
+    init {
+        viewModelScope.launch {
+            voiceController.events.collect { event -> handleVoiceEvent(event) }
+        }
+    }
 
     // ---------- 텍스트 채팅 ----------
 
@@ -39,14 +42,19 @@ class ChatViewModel(
         if (!current.isSendEnabled) return
         val prompt = current.inputText.trim()
         _state.update { it.copy(inputText = "") }
-        submitUserPrompt(prompt, speakResult = false)
+        submitUserPrompt(prompt)
     }
 
-    // ---------- 보이스 모드 ----------
+    // ---------- 인라인 음성 입력 (한 번만 받아쓰기) ----------
 
     fun startVoiceMode() {
         if (_state.value.voice.isActive) return
         Log.d(TAG, "startVoiceMode")
+        // 메시지 TTS 재생 중이면 중단
+        if (_state.value.playingMessageId != null) {
+            voiceController.stopSpeaking()
+            _state.update { it.copy(playingMessageId = null) }
+        }
         _state.update {
             it.copy(
                 voice = VoiceState(
@@ -55,101 +63,98 @@ class ChatViewModel(
                 )
             )
         }
-        collectVoiceEvents()
         voiceController.startListening()
     }
 
     fun endVoiceMode() {
         Log.d(TAG, "endVoiceMode")
         voiceController.stopListening()
-        voiceController.stopSpeaking()
-        voiceEventsJob?.cancel()
-        voiceEventsJob = null
         _state.update { it.copy(voice = VoiceState()) }
     }
 
-    private fun collectVoiceEvents() {
-        voiceEventsJob?.cancel()
-        voiceEventsJob = viewModelScope.launch {
-            voiceController.events.collect { event -> handleVoiceEvent(event) }
+    // ---------- 메시지별 TTS 토글 ----------
+
+    fun onMessageTtsToggled(message: ChatMessage) {
+        if (message.text.isBlank()) return
+        val current = _state.value
+        // 동일 메시지 재생 중 → 정지
+        if (current.playingMessageId == message.id) {
+            Log.d(TAG, "TTS toggle off: ${message.id}")
+            voiceController.stopSpeaking()
+            _state.update { it.copy(playingMessageId = null) }
+            return
         }
+        // 다른 재생 또는 음성 입력 중이면 정리
+        if (current.voice.isActive) {
+            voiceController.stopListening()
+            _state.update { it.copy(voice = VoiceState()) }
+        }
+        voiceController.stopSpeaking()
+        Log.d(TAG, "TTS play: ${message.id}")
+        _state.update { it.copy(playingMessageId = message.id) }
+        voiceController.speak(message.text)
     }
 
+    // ---------- VoiceEvent 처리 ----------
+
     private fun handleVoiceEvent(event: VoiceEvent) {
-        if (!_state.value.voice.isActive) return
         when (event) {
             is VoiceEvent.Rms -> {
-                // 일반적으로 SpeechRecognizer rmsdB 는 약 -2 ~ 10 범위. 0..1로 정규화.
+                if (!_state.value.voice.isActive) return
                 val normalized = ((event.value + 2f) / 12f).coerceIn(0f, 1f)
                 _state.update { it.copy(voice = it.voice.copy(amplitude = normalized)) }
             }
             is VoiceEvent.Partial -> {
+                if (!_state.value.voice.isActive) return
                 _state.update { it.copy(voice = it.voice.copy(partialText = event.text)) }
             }
             is VoiceEvent.Final -> {
-                Log.d(TAG, "Final recognized text: \"${event.text}\"")
+                if (!_state.value.voice.isActive) return
+                Log.d(TAG, "Final recognized: \"${event.text}\"")
                 onSpeechRecognized(event.text)
             }
             is VoiceEvent.EndOfSpeech -> {
-                Log.d(TAG, "EndOfSpeech -> THINKING")
+                if (!_state.value.voice.isActive) return
                 _state.update {
                     it.copy(voice = it.voice.copy(mode = VoiceMode.THINKING, amplitude = 0f))
                 }
             }
             is VoiceEvent.SpeakingStarted -> {
-                Log.d(TAG, "SpeakingStarted -> SPEAKING")
-                _state.update { it.copy(voice = it.voice.copy(mode = VoiceMode.SPEAKING)) }
+                Log.d(TAG, "SpeakingStarted")
             }
             is VoiceEvent.SpeakingFinished -> {
-                Log.d(TAG, "SpeakingFinished -> resume listening")
-                resumeListeningIfActive()
+                Log.d(TAG, "SpeakingFinished")
+                _state.update { it.copy(playingMessageId = null) }
             }
             is VoiceEvent.Error -> {
                 Log.w(TAG, "Voice error: ${event.message}")
                 _state.update {
-                    it.copy(voice = it.voice.copy(errorMessage = event.message, isActive = false))
+                    it.copy(
+                        voice = VoiceState(errorMessage = event.message),
+                        playingMessageId = null
+                    )
                 }
                 voiceController.stopListening()
-                voiceEventsJob?.cancel()
-                voiceEventsJob = null
             }
             VoiceEvent.ReadyForSpeech,
             VoiceEvent.BeginningOfSpeech -> {
-                _state.update {
-                    it.copy(voice = it.voice.copy(mode = VoiceMode.LISTENING))
-                }
+                if (!_state.value.voice.isActive) return
+                _state.update { it.copy(voice = it.voice.copy(mode = VoiceMode.LISTENING)) }
             }
         }
     }
 
     private fun onSpeechRecognized(text: String) {
         val cleaned = text.trim()
-        if (cleaned.isBlank()) {
-            // 인식 실패 → 다시 듣기
-            resumeListeningIfActive()
-            return
-        }
-        _state.update { it.copy(voice = it.voice.copy(partialText = "")) }
-        submitUserPrompt(cleaned, speakResult = true)
-    }
-
-    private fun resumeListeningIfActive() {
-        if (!_state.value.voice.isActive) return
-        _state.update {
-            it.copy(
-                voice = it.voice.copy(
-                    mode = VoiceMode.LISTENING,
-                    amplitude = 0f,
-                    partialText = ""
-                )
-            )
-        }
-        voiceController.startListening()
+        // 인식 결과 수신 시 즉시 음성 모드 종료 (한 번만 받아쓰기)
+        _state.update { it.copy(voice = VoiceState()) }
+        if (cleaned.isBlank()) return
+        submitUserPrompt(cleaned)
     }
 
     // ---------- 공통 송신 흐름 ----------
 
-    private fun submitUserPrompt(prompt: String, speakResult: Boolean) {
+    private fun submitUserPrompt(prompt: String) {
         val userMessage = ChatMessage(text = prompt, senderType = SenderType.USER)
         val aiPlaceholder = ChatMessage(
             text = "",
@@ -163,26 +168,17 @@ class ChatViewModel(
             )
         }
         viewModelScope.launch {
-            val fullText = streamAiResponse(prompt, aiPlaceholder.id)
-            if (speakResult && fullText.isNotBlank() && _state.value.voice.isActive) {
-                voiceController.speak(fullText)
-            } else if (speakResult && _state.value.voice.isActive) {
-                // 응답이 비었을 경우에도 다시 듣기로 복귀
-                resumeListeningIfActive()
-            }
+            streamAiResponse(prompt, aiPlaceholder.id)
         }
     }
 
-    private suspend fun streamAiResponse(prompt: String, aiMessageId: String): String {
-        val builder = StringBuilder()
+    private suspend fun streamAiResponse(prompt: String, aiMessageId: String) {
         runCatching {
             aiRepository.sendMessage(prompt).collect { chunk ->
-                builder.append(chunk)
                 appendChunkToMessage(aiMessageId, chunk)
             }
         }
         finalizeMessage(aiMessageId)
-        return builder.toString()
     }
 
     private fun appendChunkToMessage(messageId: String, chunk: String) {

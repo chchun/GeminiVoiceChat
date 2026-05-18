@@ -11,6 +11,7 @@ composeBom = "2026.02.01"
 lifecycleViewmodelCompose = "2.10.0"
 okhttp = "4.12.0"
 kotlinxSerialization = "1.7.3"
+composeMarkdown = "0.5.7"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,7 @@ androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lif
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+compose-markdown = { group = "com.github.jeziellago", name = "compose-markdown", version.ref = "composeMarkdown" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

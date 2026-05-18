@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -29,12 +31,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -55,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -68,7 +75,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aromit.geminivoicechat.domain.model.ChatMessage
 import com.aromit.geminivoicechat.domain.model.SenderType
-import com.aromit.geminivoicechat.ui.voice.VoiceOverlay
+import com.aromit.geminivoicechat.ui.voice.VoiceState
+import dev.jeziellago.compose.markdowntext.MarkdownText
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -126,48 +134,67 @@ fun ChatScreen(
         lastUserMessageId = state.messages.lastOrNull { it.senderType == SenderType.USER }?.id
     )
 
-    Box(modifier = modifier.fillMaxSize()) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            topBar = {
-                TopAppBar(
-                    title = { Text("Gemini Voice Chat") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        titleContentColor = MaterialTheme.colorScheme.onPrimary
-                    )
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("Gemini Voice Chat") },
+                actions = {
+                    AnimatedVisibility(visible = state.isVoiceInputActive) {
+                        VoiceActiveIndicator()
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 )
-            }
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .imePadding()
-            ) {
-                MessageList(
-                    messages = state.messages,
-                    listState = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                )
-                InputBar(
-                    inputText = state.inputText,
-                    isSendEnabled = state.isSendEnabled,
-                    onInputChanged = viewModel::onInputChanged,
-                    onSendClicked = onSend,
-                    onMicClicked = onMicClicked
-                )
-            }
-        }
-
-        if (state.voice.isActive) {
-            VoiceOverlay(
-                voiceState = state.voice,
-                onClose = viewModel::endVoiceMode
             )
         }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .imePadding()
+        ) {
+            MessageList(
+                messages = state.messages,
+                playingMessageId = state.playingMessageId,
+                onTtsToggled = viewModel::onMessageTtsToggled,
+                listState = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            )
+            InputBar(
+                inputText = state.inputText,
+                isSendEnabled = state.isSendEnabled,
+                voice = state.voice,
+                onInputChanged = viewModel::onInputChanged,
+                onSendClicked = onSend,
+                onMicClicked = onMicClicked,
+                onVoiceStopClicked = viewModel::endVoiceMode
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceActiveIndicator() {
+    Box(
+        modifier = Modifier
+            .padding(end = 12.dp)
+            .size(32.dp)
+            .background(color = Color(0xFF34A853), shape = CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Mic,
+            contentDescription = "음성 모드 활성",
+            tint = Color.White,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
@@ -205,6 +232,8 @@ private fun AutoScrollEffect(
 @Composable
 private fun MessageList(
     messages: List<ChatMessage>,
+    playingMessageId: String?,
+    onTtsToggled: (ChatMessage) -> Unit,
     listState: LazyListState,
     modifier: Modifier = Modifier
 ) {
@@ -217,10 +246,17 @@ private fun MessageList(
         modifier = modifier,
         state = listState,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(items = messages, key = { it.id }) { message ->
-            MessageBubble(message = message)
+            when (message.senderType) {
+                SenderType.USER -> UserMessageBubble(message = message)
+                SenderType.AI -> AiMessage(
+                    message = message,
+                    isPlaying = playingMessageId == message.id,
+                    onTtsToggled = { onTtsToggled(message) }
+                )
+            }
         }
     }
 }
@@ -239,46 +275,99 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
-    val isUser = message.senderType == SenderType.USER
-    val bubbleAlignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
-    val bubbleColor = if (isUser) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val shape = if (isUser) {
-        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp)
-    } else {
-        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp)
-    }
+private fun UserMessageBubble(message: ChatMessage) {
+    val bubbleColor = MaterialTheme.colorScheme.primary
+    val textColor = MaterialTheme.colorScheme.onPrimary
+    val shape = RoundedCornerShape(
+        topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp
+    )
 
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = bubbleAlignment) {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         Surface(
             color = bubbleColor,
             shape = shape,
             modifier = Modifier.widthIn(max = 300.dp)
         ) {
-            if (message.text.isEmpty() && message.isStreaming) {
-                ThinkingDots(
-                    color = textColor,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-            } else {
-                Text(
-                    text = message.text,
-                    color = textColor,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            Text(
+                text = message.text,
+                color = textColor,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AiMessage(
+    message: ChatMessage,
+    isPlaying: Boolean,
+    onTtsToggled: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SparkleHeaderIcon(isStreaming = message.isStreaming)
+            Spacer(modifier = Modifier.weight(1f))
+            val ttsEnabled = message.text.isNotBlank() && !message.isStreaming
+            IconButton(
+                onClick = onTtsToggled,
+                enabled = ttsEnabled
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = if (isPlaying) "TTS 정지" else "TTS 재생",
+                    tint = if (isPlaying) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
             }
         }
+        Spacer(modifier = Modifier.height(4.dp))
+        if (message.text.isEmpty() && message.isStreaming) {
+            ThinkingDots(
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
+            )
+        } else {
+            MarkdownText(
+                markdown = message.text,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            )
+        }
     }
+}
+
+@Composable
+private fun SparkleHeaderIcon(isStreaming: Boolean) {
+    val transition = rememberInfiniteTransition(label = "sparkle")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "sparkle-rotation"
+    )
+    val angle = if (isStreaming) rotation else 0f
+    Icon(
+        imageVector = Icons.Filled.AutoAwesome,
+        contentDescription = null,
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .size(28.dp)
+            .rotate(angle)
+    )
 }
 
 @Composable
@@ -319,9 +408,11 @@ private fun ThinkingDots(
 private fun InputBar(
     inputText: String,
     isSendEnabled: Boolean,
+    voice: VoiceState,
     onInputChanged: (String) -> Unit,
     onSendClicked: () -> Unit,
-    onMicClicked: () -> Unit
+    onMicClicked: () -> Unit,
+    onVoiceStopClicked: () -> Unit
 ) {
     Surface(
         tonalElevation = 3.dp,
@@ -335,48 +426,104 @@ private fun InputBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            IconButton(
-                onClick = onMicClicked,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary
+            if (voice.isActive) {
+                Spacer(modifier = Modifier.size(8.dp))
+                VoiceWaveform(
+                    amplitude = voice.amplitude,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
                 )
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Mic,
-                    contentDescription = "Start voice mode"
-                )
-            }
+                FilledIconButton(
+                    onClick = onVoiceStopClicked,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Stop,
+                        contentDescription = "음성 입력 취소"
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = onMicClicked,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Mic,
+                        contentDescription = "음성 입력 시작"
+                    )
+                }
 
-            TextField(
-                value = inputText,
-                onValueChange = onInputChanged,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("메시지를 입력하세요") },
-                singleLine = true,
-                textStyle = TextStyle(fontSize = MaterialTheme.typography.bodyLarge.fontSize),
-                shape = RoundedCornerShape(24.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent
-                ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(
-                    onSend = { if (isSendEnabled) onSendClicked() }
+                TextField(
+                    value = inputText,
+                    onValueChange = onInputChanged,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("메시지를 입력하세요") },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = MaterialTheme.typography.bodyLarge.fontSize),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = { if (isSendEnabled) onSendClicked() }
+                    )
                 )
-            )
 
-            Spacer(modifier = Modifier.size(0.dp))
-
-            FilledIconButton(
-                onClick = onSendClicked,
-                enabled = isSendEnabled
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send message"
-                )
+                FilledIconButton(
+                    onClick = onSendClicked,
+                    enabled = isSendEnabled
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "메시지 전송"
+                    )
+                }
             }
         }
     }
 }
+
+@Composable
+private fun VoiceWaveform(
+    amplitude: Float,
+    modifier: Modifier = Modifier
+) {
+    val transition = rememberInfiniteTransition(label = "waveform")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * Math.PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "waveform-phase"
+    )
+    val barCount = 22
+    val color = MaterialTheme.colorScheme.primary
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        repeat(barCount) { index ->
+            val wave = (kotlin.math.sin(phase + index * 0.55f) + 1f) / 2f
+            val intensity = (0.15f + amplitude.coerceIn(0f, 1f) * 0.85f) * wave
+            val heightDp = (4 + (intensity * 36f)).dp
+            Box(
+                modifier = Modifier
+                    .size(width = 4.dp, height = heightDp)
+                    .background(color = color, shape = RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+

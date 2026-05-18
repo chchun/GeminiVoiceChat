@@ -5,6 +5,34 @@
 
 ---
 
+## [1.2.0] - 2026-05-18
+
+Phase 2 UI — AI 답변 마크다운 렌더링, 메시지별 TTS 토글, 인라인 음성 받아쓰기.
+
+### Added
+
+- **AI 메시지 마크다운 렌더링** — AI 답변이 말풍선 없이 풀폭으로 표시되며 `compose-markdown` 라이브러리를 통해 **굵게 / 기울임 / 제목 / 리스트 / 인라인 코드 / 표** 등 표준 마크다운을 렌더링.
+- **스파클(✦) 아이콘 회전** — AI가 응답을 스트리밍하는 동안 메시지 상단 좌측의 스파클 아이콘이 회전. 완료 시 정지.
+- **메시지별 TTS 토글** — AI 메시지 우측 상단에 스피커(🔊) 아이콘 추가. 탭하면 해당 메시지를 TTS 재생, 재생 중 탭하면 정지(아이콘이 ■로 전환). 다른 메시지의 스피커를 탭하면 이전 재생이 자동 중단.
+- **인라인 음성 입력** — 마이크 버튼 탭 시 별도 화면 이동 없이 InputBar가 파형 애니메이션으로 전환. 음성 인식이 완료되면 자동으로 텍스트가 전송되고 키보드 모드로 복귀 (한 번만 받아쓰기).
+- **음성 모드 활성 인디케이터** — 음성 입력 중 TopAppBar 우측에 초록 원형 마이크 칩 표시 (탭 동작 없음).
+- **`ChatState.playingMessageId`** — 현재 TTS 재생 중인 메시지 ID를 추적하는 상태 필드.
+- **의존성 추가**
+  - `com.github.jeziellago:compose-markdown:0.5.7` (JitPack)
+- **문서 추가**: `app/docs/07_ui_markdown_voice_inline.md` — 변경 사양, 상태 전환 흐름, API 변경 요점.
+
+### Changed
+
+- **`ChatViewModel` 이벤트 수집** — `voiceEventsJob` 패턴(startVoiceMode 시 시작, endVoiceMode 시 취소) → `init {}` 블록에서 항상 수집으로 변경. TTS 이벤트(`SpeakingStarted`/`SpeakingFinished`)를 음성 모드 밖에서도 처리하기 위함.
+- **음성 입력 흐름** — 기존 `LISTENING → THINKING → SPEAKING → LISTENING` 자동 루프 → 한 번만 받아쓰기 후 자동 전송. `speakResult` 플래그 및 `resumeListeningIfActive()` 제거.
+- **`settings.gradle.kts`** — `dependencyResolutionManagement.repositories`에 JitPack 저장소 추가.
+
+### Removed
+
+- **`VoiceOverlay.kt`** — 전체화면 오버레이 방식 폐기. 인라인 파형으로 대체.
+
+---
+
 ## [1.1.0] - 2026-05-17
 
 Phase 1 — 실제 FastAPI 서버(WebSocket)와의 end-to-end 통합. Mock-only였던 v1.0.0에서 처음으로 외부 서버 응답이 단말까지 도달.

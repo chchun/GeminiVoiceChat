@@ -7,8 +7,12 @@ data class ChatState(
     val messages: List<ChatMessage> = emptyList(),
     val inputText: String = "",
     val isAiResponding: Boolean = false,
-    val voice: VoiceState = VoiceState()
+    val voice: VoiceState = VoiceState(),
+    val playingMessageId: String? = null
 ) {
     val isSendEnabled: Boolean
         get() = inputText.isNotBlank() && !isAiResponding
+
+    val isVoiceInputActive: Boolean
+        get() = voice.isActive
 }
