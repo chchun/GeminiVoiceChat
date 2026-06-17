@@ -1,7 +1,7 @@
 # Gemini Voice Chat
 
 Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라이언트.
-텍스트와 음성 두 가지 방식으로 AI와 대화할 수 있고, 백엔드 없이도 동작하는 Mock 모드로 완전한 UI/UX를 체험할 수 있습니다.
+텍스트·음성으로 AI와 대화하고, **A2UI v0.9 생성형 UI**로 AI가 직접 인터랙티브 폼·대시보드를 채팅 안에서 렌더링합니다.
 
 > **이 저장소를 처음 보는 분께**: 이 문서는 단순한 사용법 안내를 넘어, Android 모던 아키텍처(MVVM + DIP + Jetpack Compose + Coroutines/Flow)를 학습할 수 있도록 구조와 핵심 개념을 코드 위치와 함께 설명합니다.
 
@@ -29,8 +29,9 @@ Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라�
 
 ### 개발자 입장
 - **Mock 모드** (기본): 가짜 AI가 동작합니다. 외부 서버 없이 UI/UX의 완성도를 검증할 수 있습니다.
-- **Remote 모드** (v1.1.0~): FastAPI 서버와 WebSocket으로 연결, 실제 Gemini 응답을 스트리밍합니다. `local.properties`의 한 줄(`USE_REMOTE=true`)로 전환. [§7 확장하기](#7-확장하기--mock에서-실제-서버로) 참조.
-- 두 모드는 **UI/ViewModel 코드를 한 줄도 안 바꾸고** 교체됩니다. 이 책임 분리를 가능하게 하는 원칙이 DIP — 의존성 역전 원칙.
+- **Remote 모드** (v1.1.0~, v1.3.0~): ncloud AI 서버와 HTTP POST 청크 스트리밍으로 연결, 실제 AI 응답을 스트리밍합니다. `local.properties` 한 줄(`USE_REMOTE=true`)로 전환. [§7 확장하기](#7-확장하기--mock에서-실제-서버로) 참조.
+- **A2UI 모드** (v1.4.0~): 특정 키워드 입력 시 AI가 인터랙티브 UI(폼/대시보드/위험성평가)를 채팅 안에 직접 생성합니다. 서버 호출 없이 로컬에서 즉시 렌더링.
+- 세 모드 모두 **UI/ViewModel 코드를 한 줄도 안 바꾸고** 교체됩니다. 이 책임 분리를 가능하게 하는 원칙이 DIP — 의존성 역전 원칙.
 
 ---
 
@@ -44,7 +45,8 @@ Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라�
 | 비동기 | **Coroutines + Flow** | 콜백 지옥 없이 비동기/스트리밍 코드를 동기 코드처럼 작성. |
 | 음성 인식 | **`android.speech.SpeechRecognizer`** | 안드로이드 OS 내장 STT. 네트워크/온디바이스 둘 다 지원. |
 | 음성 합성 | **`android.speech.tts.TextToSpeech`** | 안드로이드 OS 내장 TTS. |
-| 마크다운 | **compose-markdown 0.5.7** | AI 답변의 **/**제목/리스트/표/코드 마크다운 렌더링. |
+| 마크다운 | **compose-markdown 0.5.7** | AI 답변의 굵게/제목/리스트/표/코드 마크다운 렌더링. |
+| 생성형 UI | **A2UI v0.9 (Compose 네이티브)** | AI 에이전트가 채팅 안에서 인터랙티브 UI 서피스를 생성. |
 | 디자인 시스템 | **Material 3** | 구글 표준 디자인 가이드의 최신 버전. |
 | 빌드 | **Gradle 9.x (Kotlin DSL)** | `build.gradle.kts` |
 | 최소 지원 | minSdk 24 (Android 7.0) / targetSdk 36 | |
@@ -78,6 +80,11 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 ### 처음 실행했을 때
 1. 텍스트 입력창에 아무 메시지나 보내보면, AI가 한국어 더미 응답을 한 단어씩 타이핑하듯 출력합니다.
 2. 좌하단 **마이크 버튼** 탭 → 마이크 권한 허용 → 입력창이 파형으로 전환되면 말을 시작하세요. 인식 완료 후 자동 전송됩니다.
+3. **A2UI 시나리오** — 아래 키워드를 입력하면 AI가 즉시 인터랙티브 UI를 생성합니다:
+   - `인시던트` → 인시던트 보고 폼 (P1/P2/P3 선택 + 증상 입력 + 제출)
+   - `배포` → 카나리 배포 승인 패널 (트래픽 슬라이더 + 헬스체크 + 배포 시작)
+   - `상태 카드` → 서비스 메트릭 대시보드 (p99/에러율/RPS)
+   - `위험성평가` → 위험성평가 자동 생성 폼 (공종 선택 → AI 위험 항목 생성)
 
 ### 갤럭시(특히 S24)에서 음성 인식이 안 될 때
 - 설정 → 일반 → 언어 및 키보드 → **온디바이스 음성 인식 → 한국어 추가**
@@ -111,9 +118,11 @@ app/
 ├── docs/
 │   ├── 01_requirements.md            # PRD (제품 요구사항 정의서)
 │   ├── 02_architecture.md            # 기술 아키텍처 가이드
-│   ├── 03_server_api.md              # 서버 WebSocket 통신 규격 (SSoT)
+│   ├── 03_server_api.md              # 서버 통신 규격 (HTTP POST + WebSocket 이력)
 │   ├── 04_server_handoff.md          # Phase 1 서버 통합 가이드
-│   └── 05_websocket_keepalive_fix.md # Keepalive + 백그라운드 재연결 처방
+│   ├── 05_websocket_keepalive_fix.md # Keepalive + 백그라운드 재연결 처방
+│   ├── 07_ui_markdown_voice_inline.md # v1.2.0 UI 변경 사양
+│   └── 08_a2ui_generative_ui.md      # A2UI v0.9 프로토콜 + 시나리오 레퍼런스
 ├── src/
 │   ├── main/
 │   │   ├── AndroidManifest.xml   # 앱 메타데이터, 권한, 컴포넌트 선언
@@ -140,10 +149,16 @@ com.aromit.geminivoicechat/
 │   └── repository/
 │       └── AiRepository.kt       # AI 통신 인터페이스 — 구현체는 모름
 │
+├── a2ui/                         # 🟪 A2UI 레이어 — 생성형 UI 런타임 (v1.4.0~)
+│   ├── A2UIModel.kt              # 타입 시스템 (컴포넌트 sealed class, 서피스, 조건 등)
+│   ├── A2UIRuntime.kt            # 실행 엔진 (JSON Pointer, formatString, 조건 평가)
+│   ├── A2UIScenarios.kt          # 4개 데모 시나리오 + 키워드 매칭
+│   └── A2UIRenderer.kt           # Compose 재귀 렌더러
+│
 ├── data/                         # 🟩 데이터 레이어 — 인터페이스 구현체
 │   └── repository/
 │       ├── MockAiRepository.kt   # 가짜 AI 구현 (delay + Flow emit으로 시뮬레이션)
-│       └── RemoteAiRepository.kt # FastAPI 서버 WebSocket 구현 (v1.1.0~)
+│       └── RemoteAiRepository.kt # ncloud HTTP POST 청크 스트리밍 구현 (v1.3.0~)
 │
 ├── di/                           # 🟨 의존성 주입(DI) 모듈
 │   └── AppContainer.kt           # 어떤 구현체를 인터페이스에 바인딩할지 결정
@@ -458,16 +473,16 @@ override fun onError(error: Int) {
 
 ## 7. 확장하기 — Mock에서 실제 서버로
 
-> v1.1.0부터 `RemoteAiRepository`가 구현되어 있어 **새 파일을 만들 필요가 없습니다.** `local.properties`에서 플래그만 켜면 즉시 서버 모드로 전환됩니다.
+> v1.3.0부터 `RemoteAiRepository`가 HTTP POST 방식으로 재구현되어 있습니다. `local.properties`에서 플래그만 켜면 즉시 ncloud 서버 모드로 전환됩니다.
 
-### 7.1 가장 짧은 경로 (서버는 별도 저장소에서 실행 중이라 가정)
+### 7.1 가장 짧은 경로
 
-**Step 1.** `local.properties`에 3줄 추가:
+**Step 1.** `local.properties`에 추가 (git 추적 제외):
 
 ```properties
 USE_REMOTE=true
-SERVER_URL=ws://10.0.2.2:8000/ws        # 에뮬레이터용. 실기기는 PC LAN IP
-WS_API_KEY=<서버 .env의 WS_API_KEY와 동일 값>
+SERVER_URL=http://223.130.159.179:8000/chat/stream
+WS_API_KEY=
 ```
 
 **Step 2.** `./gradlew installDebug` — `BuildConfig.USE_REMOTE`가 true가 되어 `DefaultAppContainer`가 `RemoteAiRepository`를 바인딩합니다.
@@ -578,6 +593,7 @@ logcat 필터: `adb logcat -s RemoteAiRepository:*`
 - **[app/docs/04_server_handoff.md](app/docs/04_server_handoff.md)** — Phase 1 서버 통합 가이드 (엔드포인트, API 키 동기화, 스모크 테스트).
 - **[app/docs/05_websocket_keepalive_fix.md](app/docs/05_websocket_keepalive_fix.md)** — Keepalive 및 백그라운드 재연결 처방 (Samsung 디바이스 실측 결과 포함).
 - **[app/docs/07_ui_markdown_voice_inline.md](app/docs/07_ui_markdown_voice_inline.md)** — v1.2.0 UI 변경 사양 (마크다운 렌더링, TTS 토글, 인라인 음성 입력 흐름).
+- **[app/docs/08_a2ui_generative_ui.md](app/docs/08_a2ui_generative_ui.md)** — A2UI v0.9 생성형 UI (v1.4.0~). 프로토콜, 컴포넌트 레퍼런스, 4개 시나리오 동작 흐름, 확장 가이드.
 - **[CHANGELOG.md](CHANGELOG.md)** — 버전별 변경 이력.
 - **[TODO.md](TODO.md)** — 미구현 항목 (배지인, 문장단위 TTS, Phase 2 등).
 - **[CLAUDE.md](CLAUDE.md)** — AI 코딩 어시스턴트용 컨텍스트.

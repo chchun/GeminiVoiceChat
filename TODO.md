@@ -28,7 +28,7 @@
 
 ## 아키텍처/Phase 2 준비
 
-### 3. `RemoteAiRepository` 스캐폴딩 — ✅ 완료 (2026-05-17)
+### 3. `RemoteAiRepository` — ✅ WebSocket 구현 완료 (2026-05-17) → ✅ HTTP POST 전환 완료 (2026-06-17)
 - **결과:**
   - `data/repository/RemoteAiRepository.kt` 구현 (OkHttp WebSocket, 세션 유지, READY 대기, `text_chunk` 라우팅, `text_done`에서 Flow 종료).
   - `DefaultAppContainer`가 `BuildConfig.USE_REMOTE`로 분기 (default false → Mock).
@@ -84,7 +84,25 @@
 
 ---
 
+## A2UI / 생성형 UI
+
+### 9. A2UI 서버 연동 (현재 로컬 데모만) — 미구현
+- **현재 상태:** 키워드 매칭 → 로컬 시나리오 응답 (서버 호출 없음).
+- **목표:** 서버가 실제 A2UI 엔벨로프(JSONL)를 응답하면 클라이언트가 파싱·렌더링.
+- **구현 메모:** HTTP POST 응답 스트림에서 `\n` 구분 줄이 `{"version":"v0.9",...}` 형태면 서피스 업데이트, 일반 텍스트면 기존 청크 누적. `ChatViewModel.streamAiResponse`에 분기 로직 추가.
+
+### 10. A2UI DataTable — 모바일 최적화 개선
+- **현재 상태:** 위험성평가 결과를 `RiskCardList` (카드 목록)으로 표시. 웹앱의 19열 DataTable은 모바일에서 불가.
+- **개선 옵션:**
+  - (a) 가로 스크롤 테이블 (`LazyRow` + `LazyColumn` 조합).
+  - (b) 카드 상세 보기 모달 — 카드 탭 시 전체 필드 표시.
+  - (c) 현재 카드 방식 유지 + 편집 모드 추가 (위험도·담당자 변경).
+
+### 11. A2UI 시나리오 확장
+- 추가 가능한 시나리오: 회의 예약, 승인 결재, KPI 대시보드, 작업 지시서, 안전 점검 체크리스트 등.
+- `A2UIScenarios.ALL` 리스트에 `Scenario` 항목 추가로 확장 가능.
+
 ## 문서
 
-### 9. 빌드 트러블슈팅 메모
+### 12. 빌드 트러블슈팅 메모
 - Windows + 신규 셸에서 `JAVA_HOME` 미설정 시 `./gradlew` 실패. CLAUDE.md에 명시는 했지만, 신규 개발자용으로 `app/docs/` 에 환경 셋업 문서를 추가하는 것도 고려.

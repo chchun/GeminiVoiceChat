@@ -1,0 +1,651 @@
+From 17c5e0b4dfea8f7afd2e586f1ce203e7b02d09d6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 17 Jun 2026 12:41:20 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20CHANGELOG=20v1.3~1.4=20+=20README=20+?=
+ =?UTF-8?q?=20TODO=20+=20A2UI=20=EB=AC=B8=EC=84=9C=20=EC=B6=94=EA=B0=80?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ CHANGELOG.md                      |  73 ++++++
+ README.md                         |  42 +++-
+ TODO.md                           |  22 +-
+ app/docs/08_a2ui_generative_ui.md | 391 ++++++++++++++++++++++++++++++
+ 4 files changed, 513 insertions(+), 15 deletions(-)
+ create mode 100644 app/docs/08_a2ui_generative_ui.md
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index de4c497..6bc4851 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -5,6 +5,79 @@
+ 
+ ---
+ 
++## [1.4.0] - 2026-06-17
++
++A2UI v0.9 — AI 에이전트가 채팅 안에서 인터랙티브 UI 서피스를 직접 생성하는 생성형 UI 레이어 추가.
++
++### Added
++
++- **`a2ui/` 패키지** — A2UI v0.9 런타임 전체를 Kotlin/Compose 네이티브로 구현.
++  - **`A2UIModel.kt`** — A2UI 전체 타입 시스템 정의.
++    - `A2UIValue` — `Static` / `PathBound` / `FormatStr` 3종 값 바인딩 타입.
++    - `A2UICondition` — `Required` / `Numeric` / `And` / `Or` 조건 트리 (버튼 유효성 검사용).
++    - `A2UIComponent` (sealed) — `Card`, `Column`, `Row`, `TextComp`, `IconComp`, `Divider`, `ButtonComp`, `TextFieldComp`, `CheckBoxComp`, `ChoicePickerComp`, `SliderComp`, `SwitchComp`, `TagInputComp`, `SelectComp`, `RiskCardList` 14종.
++    - `A2UISurface` — 서피스 상태 (컴포넌트 트리 + 데이터 모델 + 테마).
++  - **`A2UIRuntime.kt`** — A2UI 실행 엔진.
++    - JSON Pointer(RFC 6901) 경로 해석 (`getAtPath` / `setAtPath`).
++    - `formatString` 보간 — `${/deploy/canary}%` 형태의 템플릿을 데이터 모델 값으로 실시간 치환.
++    - 조건 평가 (`evalCondition`) — 중첩 `And/Or/Numeric/Required` 재귀 평가.
++    - `deepCopyModel` — 상태 업데이트 시 불변성 보장을 위한 데이터 모델 deep copy.
++  - **`A2UIScenarios.kt`** — 4개 데모 시나리오 정의 및 키워드 자동 매칭.
++    - **인시던트 보고 폼** (`인시던트`, `incident`, `장애 보고` 등) — ChoicePicker(P1/P2/P3) + TextField(서비스/증상) + CheckBox(고객 영향) + required 유효성 버튼.
++    - **카나리 배포 승인** (`배포`, `deploy`, `카나리` 등) — Slider(트래픽 %) + formatString 실시간 텍스트 + CheckBox(헬스체크) + `And(healthOk, numeric(canary, min=1))` 복합 조건 버튼.
++    - **서비스 상태 카드** (`상태 카드`, `서비스 상태` 등) — FormatStr 바인딩 메트릭(p99/에러율/RPS) + ChoicePicker 기간 선택 + 새로고침 액션.
++    - **위험성평가 자동 생성** (`위험성평가`, `위험 평가` 등) — TagInput(공종) + Select(장소/항목 수) + 생성 후 결과 카드 리스트.
++    - 6개 공종(배관·용접·비계·전기·굴착·도장) × 5개 항목 샘플 위험성평가 데이터 내장.
++  - **`A2UIRenderer.kt`** — `A2UINode` Composable 재귀 렌더러 (웹앱 `a2ui.jsx`의 Compose 포트).
++    - `A2UISurfaceView` — 서피스 진입점 Composable.
++    - 모든 14종 컴포넌트 Compose 구현 (`FilterChip`, `Slider`, `ExposedDropdownMenu`, `InputChip`, `FlowRow` 등 Material3 활용).
++    - `RiskRowCard` — DataTable 대신 모바일 최적화 리스크 카드 (위험도별 색상 배지).
++
++- **`ChatMessage.surfaceId: String?`** — AI 메시지가 A2UI 서피스를 선택적으로 보유할 수 있도록 필드 추가.
++- **`ChatState.surfaces: Map<String, A2UISurface>`** — 활성 서피스 상태를 ViewModel이 중앙 관리.
++- **`ChatViewModel.onA2UIData()`** — 폼 입력 변경 시 JSON Pointer 경로로 데이터 모델 업데이트. deep copy로 불변성 보장.
++- **`ChatViewModel.onA2UIAction()`** — 버튼 액션 이벤트 처리.
++  - `create_incident` → 인시던트 번호 채번 + 접수 확인 메시지.
++  - `start_deploy` → 카나리 배포 시작 메시지.
++  - `cancel_deploy` → 취소 메시지.
++  - `refresh_status` → 지표 재조회 메시지.
++  - `generate_risk` → 공종별 위험성평가 결과 서피스 생성 후 채팅에 삽입.
++- **`ChatScreen.AiMessage()`** — 마크다운 아래에 `A2UISurfaceView` 조건부 렌더링 추가.
++- **문서 추가**: `app/docs/08_a2ui_generative_ui.md` — A2UI 프로토콜, 컴포넌트 레퍼런스, 데이터 바인딩, 시나리오별 동작 흐름.
++
++### Changed
++
++- **`ChatViewModel.submitUserPrompt()`** — 키워드 감지 시 서버 호출 없이 로컬 시나리오 응답으로 단락. 매칭 없는 일반 메시지는 기존 HTTP POST 스트리밍 유지.
++- **`ChatScreen.MessageList()`** — `surfaces`, `onA2UIData`, `onA2UIAction` 파라미터 추가.
++
++---
++
++## [1.3.0] - 2026-06-17
++
++ncloud 연동 — 서버 통신 프로토콜을 WebSocket에서 HTTP POST 청크 스트리밍으로 전환. `feature/ncloud-integration` 브랜치.
++
++### Added
++
++- **`local.properties` 설정값 추가** — `SERVER_URL=http://223.130.159.179:8000/chat/stream`. `WS_API_KEY` 는 현재 미사용(서버 인증 없음).
++
++### Changed
++
++- **`RemoteAiRepository.kt`** — WebSocket(OkHttp `WebSocketListener`) → HTTP POST 청크 스트리밍으로 전면 재작성.
++  - 요청: `POST /chat/stream` · `Content-Type: application/json` · body `{"session_id": "<uuid>", "message": "<text>"}`.
++  - 응답: chunked transfer-encoding 텍스트 스트림. `okio.Buffer`로 8 KB 단위 읽기 → `Flow.emit`.
++  - 세션 ID는 앱 실행 동안 고정 UUID — 서버 측 멀티턴 대화 컨텍스트 유지.
++  - `connectTimeout` 10 s / `readTimeout` 120 s (스트리밍 응답 대비).
++  - WebSocket 관련 import(`WebSocketListener`, `WebSocket`, `response.handleText` 등) 전량 제거.
++  - `@Suppress("UNUSED_PARAMETER") apiKey` 파라미터 보존 — 향후 인증 도입 대비 인터페이스 시그니처 유지.
++- **`app/docs/03_server_api.md`** — ncloud HTTP POST 규격 섹션 추가 (v1.3).
++
++### Removed
++
++- WebSocket keepalive (`pingInterval`, `ProcessLifecycleOwner` 옵저버, `connectionMutex`, `isConnectionAlive` 플래그) — HTTP POST는 연결 유지가 불필요하므로 전량 제거.
++- `kotlinx.serialization`의 `TextInput` / `InboundMessage` 봉인 클래스 — HTTP POST 응답은 평문 텍스트 청크이므로 JSON 파싱 불필요.
++
++---
++
+ ## [1.2.0] - 2026-05-18
+ 
+ Phase 2 UI — AI 답변 마크다운 렌더링, 메시지별 TTS 토글, 인라인 음성 받아쓰기.
+diff --git a/README.md b/README.md
+index bc40b64..9fd57d4 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # Gemini Voice Chat
+ 
+-Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라이언트.
+-텍스트와 음성 두 가지 방식으로 AI와 대화할 수 있고, 백엔드 없이도 동작하는 Mock 모드로 완전한 UI/UX를 체험할 수 있습니다.
++Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라이언트.  
++텍스트·음성으로 AI와 대화하고, **A2UI v0.9 생성형 UI**로 AI가 직접 인터랙티브 폼·대시보드를 채팅 안에서 렌더링합니다.
+ 
+ > **이 저장소를 처음 보는 분께**: 이 문서는 단순한 사용법 안내를 넘어, Android 모던 아키텍처(MVVM + DIP + Jetpack Compose + Coroutines/Flow)를 학습할 수 있도록 구조와 핵심 개념을 코드 위치와 함께 설명합니다.
+ 
+@@ -29,8 +29,9 @@ Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라
+ 
+ ### 개발자 입장
+ - **Mock 모드** (기본): 가짜 AI가 동작합니다. 외부 서버 없이 UI/UX의 완성도를 검증할 수 있습니다.
+-- **Remote 모드** (v1.1.0~): FastAPI 서버와 WebSocket으로 연결, 실제 Gemini 응답을 스트리밍합니다. `local.properties`의 한 줄(`USE_REMOTE=true`)로 전환. [§7 확장하기](#7-확장하기--mock에서-실제-서버로) 참조.
+-- 두 모드는 **UI/ViewModel 코드를 한 줄도 안 바꾸고** 교체됩니다. 이 책임 분리를 가능하게 하는 원칙이 DIP — 의존성 역전 원칙.
++- **Remote 모드** (v1.1.0~, v1.3.0~): ncloud AI 서버와 HTTP POST 청크 스트리밍으로 연결, 실제 AI 응답을 스트리밍합니다. `local.properties` 한 줄(`USE_REMOTE=true`)로 전환. [§7 확장하기](#7-확장하기--mock에서-실제-서버로) 참조.
++- **A2UI 모드** (v1.4.0~): 특정 키워드 입력 시 AI가 인터랙티브 UI(폼/대시보드/위험성평가)를 채팅 안에 직접 생성합니다. 서버 호출 없이 로컬에서 즉시 렌더링.
++- 세 모드 모두 **UI/ViewModel 코드를 한 줄도 안 바꾸고** 교체됩니다. 이 책임 분리를 가능하게 하는 원칙이 DIP — 의존성 역전 원칙.
+ 
+ ---
+ 
+@@ -44,7 +45,8 @@ Gemini Live 스타일의 **실시간 대화형 AI 안드로이드 앱** 클라
+ | 비동기 | **Coroutines + Flow** | 콜백 지옥 없이 비동기/스트리밍 코드를 동기 코드처럼 작성. |
+ | 음성 인식 | **`android.speech.SpeechRecognizer`** | 안드로이드 OS 내장 STT. 네트워크/온디바이스 둘 다 지원. |
+ | 음성 합성 | **`android.speech.tts.TextToSpeech`** | 안드로이드 OS 내장 TTS. |
+-| 마크다운 | **compose-markdown 0.5.7** | AI 답변의 **/**제목/리스트/표/코드 마크다운 렌더링. |
++| 마크다운 | **compose-markdown 0.5.7** | AI 답변의 굵게/제목/리스트/표/코드 마크다운 렌더링. |
++| 생성형 UI | **A2UI v0.9 (Compose 네이티브)** | AI 에이전트가 채팅 안에서 인터랙티브 UI 서피스를 생성. |
+ | 디자인 시스템 | **Material 3** | 구글 표준 디자인 가이드의 최신 버전. |
+ | 빌드 | **Gradle 9.x (Kotlin DSL)** | `build.gradle.kts` |
+ | 최소 지원 | minSdk 24 (Android 7.0) / targetSdk 36 | |
+@@ -78,6 +80,11 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
+ ### 처음 실행했을 때
+ 1. 텍스트 입력창에 아무 메시지나 보내보면, AI가 한국어 더미 응답을 한 단어씩 타이핑하듯 출력합니다.
+ 2. 좌하단 **마이크 버튼** 탭 → 마이크 권한 허용 → 입력창이 파형으로 전환되면 말을 시작하세요. 인식 완료 후 자동 전송됩니다.
++3. **A2UI 시나리오** — 아래 키워드를 입력하면 AI가 즉시 인터랙티브 UI를 생성합니다:
++   - `인시던트` → 인시던트 보고 폼 (P1/P2/P3 선택 + 증상 입력 + 제출)
++   - `배포` → 카나리 배포 승인 패널 (트래픽 슬라이더 + 헬스체크 + 배포 시작)
++   - `상태 카드` → 서비스 메트릭 대시보드 (p99/에러율/RPS)
++   - `위험성평가` → 위험성평가 자동 생성 폼 (공종 선택 → AI 위험 항목 생성)
+ 
+ ### 갤럭시(특히 S24)에서 음성 인식이 안 될 때
+ - 설정 → 일반 → 언어 및 키보드 → **온디바이스 음성 인식 → 한국어 추가**
+@@ -111,9 +118,11 @@ app/
+ ├── docs/
+ │   ├── 01_requirements.md            # PRD (제품 요구사항 정의서)
+ │   ├── 02_architecture.md            # 기술 아키텍처 가이드
+-│   ├── 03_server_api.md              # 서버 WebSocket 통신 규격 (SSoT)
++│   ├── 03_server_api.md              # 서버 통신 규격 (HTTP POST + WebSocket 이력)
+ │   ├── 04_server_handoff.md          # Phase 1 서버 통합 가이드
+-│   └── 05_websocket_keepalive_fix.md # Keepalive + 백그라운드 재연결 처방
++│   ├── 05_websocket_keepalive_fix.md # Keepalive + 백그라운드 재연결 처방
++│   ├── 07_ui_markdown_voice_inline.md # v1.2.0 UI 변경 사양
++│   └── 08_a2ui_generative_ui.md      # A2UI v0.9 프로토콜 + 시나리오 레퍼런스
+ ├── src/
+ │   ├── main/
+ │   │   ├── AndroidManifest.xml   # 앱 메타데이터, 권한, 컴포넌트 선언
+@@ -140,10 +149,16 @@ com.aromit.geminivoicechat/
+ │   └── repository/
+ │       └── AiRepository.kt       # AI 통신 인터페이스 — 구현체는 모름
+ │
++├── a2ui/                         # 🟪 A2UI 레이어 — 생성형 UI 런타임 (v1.4.0~)
++│   ├── A2UIModel.kt              # 타입 시스템 (컴포넌트 sealed class, 서피스, 조건 등)
++│   ├── A2UIRuntime.kt            # 실행 엔진 (JSON Pointer, formatString, 조건 평가)
++│   ├── A2UIScenarios.kt          # 4개 데모 시나리오 + 키워드 매칭
++│   └── A2UIRenderer.kt           # Compose 재귀 렌더러
++│
+ ├── data/                         # 🟩 데이터 레이어 — 인터페이스 구현체
+ │   └── repository/
+ │       ├── MockAiRepository.kt   # 가짜 AI 구현 (delay + Flow emit으로 시뮬레이션)
+-│       └── RemoteAiRepository.kt # FastAPI 서버 WebSocket 구현 (v1.1.0~)
++│       └── RemoteAiRepository.kt # ncloud HTTP POST 청크 스트리밍 구현 (v1.3.0~)
+ │
+ ├── di/                           # 🟨 의존성 주입(DI) 모듈
+ │   └── AppContainer.kt           # 어떤 구현체를 인터페이스에 바인딩할지 결정
+@@ -458,16 +473,16 @@ override fun onError(error: Int) {
+ 
+ ## 7. 확장하기 — Mock에서 실제 서버로
+ 
+-> v1.1.0부터 `RemoteAiRepository`가 구현되어 있어 **새 파일을 만들 필요가 없습니다.** `local.properties`에서 플래그만 켜면 즉시 서버 모드로 전환됩니다.
++> v1.3.0부터 `RemoteAiRepository`가 HTTP POST 방식으로 재구현되어 있습니다. `local.properties`에서 플래그만 켜면 즉시 ncloud 서버 모드로 전환됩니다.
+ 
+-### 7.1 가장 짧은 경로 (서버는 별도 저장소에서 실행 중이라 가정)
++### 7.1 가장 짧은 경로
+ 
+-**Step 1.** `local.properties`에 3줄 추가:
++**Step 1.** `local.properties`에 추가 (git 추적 제외):
+ 
+ ```properties
+ USE_REMOTE=true
+-SERVER_URL=ws://10.0.2.2:8000/ws        # 에뮬레이터용. 실기기는 PC LAN IP
+-WS_API_KEY=<서버 .env의 WS_API_KEY와 동일 값>
++SERVER_URL=http://223.130.159.179:8000/chat/stream
++WS_API_KEY=
+ ```
+ 
+ **Step 2.** `./gradlew installDebug` — `BuildConfig.USE_REMOTE`가 true가 되어 `DefaultAppContainer`가 `RemoteAiRepository`를 바인딩합니다.
+@@ -578,6 +593,7 @@ logcat 필터: `adb logcat -s RemoteAiRepository:*`
+ - **[app/docs/04_server_handoff.md](app/docs/04_server_handoff.md)** — Phase 1 서버 통합 가이드 (엔드포인트, API 키 동기화, 스모크 테스트).
+ - **[app/docs/05_websocket_keepalive_fix.md](app/docs/05_websocket_keepalive_fix.md)** — Keepalive 및 백그라운드 재연결 처방 (Samsung 디바이스 실측 결과 포함).
+ - **[app/docs/07_ui_markdown_voice_inline.md](app/docs/07_ui_markdown_voice_inline.md)** — v1.2.0 UI 변경 사양 (마크다운 렌더링, TTS 토글, 인라인 음성 입력 흐름).
++- **[app/docs/08_a2ui_generative_ui.md](app/docs/08_a2ui_generative_ui.md)** — A2UI v0.9 생성형 UI (v1.4.0~). 프로토콜, 컴포넌트 레퍼런스, 4개 시나리오 동작 흐름, 확장 가이드.
+ - **[CHANGELOG.md](CHANGELOG.md)** — 버전별 변경 이력.
+ - **[TODO.md](TODO.md)** — 미구현 항목 (배지인, 문장단위 TTS, Phase 2 등).
+ - **[CLAUDE.md](CLAUDE.md)** — AI 코딩 어시스턴트용 컨텍스트.
+diff --git a/TODO.md b/TODO.md
+index d73de79..bcf7c0e 100644
+--- a/TODO.md
++++ b/TODO.md
+@@ -28,7 +28,7 @@
+ 
+ ## 아키텍처/Phase 2 준비
+ 
+-### 3. `RemoteAiRepository` 스캐폴딩 — ✅ 완료 (2026-05-17)
++### 3. `RemoteAiRepository` — ✅ WebSocket 구현 완료 (2026-05-17) → ✅ HTTP POST 전환 완료 (2026-06-17)
+ - **결과:**
+   - `data/repository/RemoteAiRepository.kt` 구현 (OkHttp WebSocket, 세션 유지, READY 대기, `text_chunk` 라우팅, `text_done`에서 Flow 종료).
+   - `DefaultAppContainer`가 `BuildConfig.USE_REMOTE`로 분기 (default false → Mock).
+@@ -84,7 +84,25 @@
+ 
+ ---
+ 
++## A2UI / 생성형 UI
++
++### 9. A2UI 서버 연동 (현재 로컬 데모만) — 미구현
++- **현재 상태:** 키워드 매칭 → 로컬 시나리오 응답 (서버 호출 없음).
++- **목표:** 서버가 실제 A2UI 엔벨로프(JSONL)를 응답하면 클라이언트가 파싱·렌더링.
++- **구현 메모:** HTTP POST 응답 스트림에서 `\n` 구분 줄이 `{"version":"v0.9",...}` 형태면 서피스 업데이트, 일반 텍스트면 기존 청크 누적. `ChatViewModel.streamAiResponse`에 분기 로직 추가.
++
++### 10. A2UI DataTable — 모바일 최적화 개선
++- **현재 상태:** 위험성평가 결과를 `RiskCardList` (카드 목록)으로 표시. 웹앱의 19열 DataTable은 모바일에서 불가.
++- **개선 옵션:**
++  - (a) 가로 스크롤 테이블 (`LazyRow` + `LazyColumn` 조합).
++  - (b) 카드 상세 보기 모달 — 카드 탭 시 전체 필드 표시.
++  - (c) 현재 카드 방식 유지 + 편집 모드 추가 (위험도·담당자 변경).
++
++### 11. A2UI 시나리오 확장
++- 추가 가능한 시나리오: 회의 예약, 승인 결재, KPI 대시보드, 작업 지시서, 안전 점검 체크리스트 등.
++- `A2UIScenarios.ALL` 리스트에 `Scenario` 항목 추가로 확장 가능.
++
+ ## 문서
+ 
+-### 9. 빌드 트러블슈팅 메모
++### 12. 빌드 트러블슈팅 메모
+ - Windows + 신규 셸에서 `JAVA_HOME` 미설정 시 `./gradlew` 실패. CLAUDE.md에 명시는 했지만, 신규 개발자용으로 `app/docs/` 에 환경 셋업 문서를 추가하는 것도 고려.
+diff --git a/app/docs/08_a2ui_generative_ui.md b/app/docs/08_a2ui_generative_ui.md
+new file mode 100644
+index 0000000..e49c369
+--- /dev/null
++++ b/app/docs/08_a2ui_generative_ui.md
+@@ -0,0 +1,391 @@
++# 08. A2UI v0.9 — 생성형 UI (Generative UI)
++
++AI 에이전트가 채팅 메시지 안에서 인터랙티브 UI 서피스를 직접 생성·조작하는 레이어.  
++웹앱([AIAgent_TUI](https://github.com/chchun/AIAgent_TUI))의 A2UI v0.9 구현을 Android Compose 네이티브로 포팅.
++
++---
++
++## 1. 개념: A2UI란?
++
++**Agent-to-UI** — 에이전트가 텍스트 응답 대신(또는 함께) 구조화된 UI 정의를 전송하면,  
++클라이언트가 그것을 인터랙티브 컴포넌트로 렌더링하는 프로토콜.
++
++```
++사용자: "인시던트 보고해줘"
++  ↓
++에이전트: { createSurface } + { updateComponents } + { updateDataModel }
++  ↓
++클라이언트: 폼 렌더링 (ChoicePicker + TextField + Button)
++  ↓
++사용자: 폼 작성 후 "인시던트 생성" 버튼 탭
++  ↓
++에이전트: "✅ INC-1234 접수 완료" 텍스트 응답
++```
++
++채팅 UI가 정적 텍스트에 머물지 않고, 에이전트 의도에 따라 **동적으로 UI를 구성**한다.
++
++---
++
++## 2. 핵심 구성 요소
++
++### 2.1 패키지 구조
++
++```
++a2ui/
++├── A2UIModel.kt       — 타입 시스템 (sealed class 컴포넌트 트리, 서피스 등)
++├── A2UIRuntime.kt     — 실행 엔진 (JSON Pointer, formatString, 조건 평가)
++├── A2UIScenarios.kt   — 4개 데모 시나리오 + 키워드 매칭
++└── A2UIRenderer.kt    — Compose 렌더러 (A2UINode recursive composable)
++```
++
++### 2.2 데이터 흐름
++
++```
++ChatViewModel
++    │
++    ├─ submitUserPrompt()
++    │      └─ A2UIScenarios.match(text) → Scenario? 
++    │              ├─ match: 로컬 시나리오 → A2UISurface 생성 → ChatState.surfaces에 저장
++    │              └─ no match: 서버 HTTP POST 스트리밍
++    │
++    ├─ onA2UIData(surfaceId, path, value)
++    │      └─ deepCopyModel() → setAtPath() → 새 surface → ChatState 갱신
++    │
++    └─ onA2UIAction(surfaceId, eventName, context)
++           └─ 이벤트별 AI 응답 메시지 생성 (+ 결과 서피스)
++
++ChatScreen
++    └─ AiMessage()
++           ├─ MarkdownText(message.text)
++           └─ A2UISurfaceView(surface, onData, onAction)   ← A2UI 렌더링
++```
++
++---
++
++## 3. A2UIModel — 타입 레퍼런스
++
++### 3.1 A2UIValue (값 바인딩)
++
++| 타입 | 예시 | 설명 |
++|---|---|---|
++| `Static(text)` | `"인시던트 보고"` | 정적 문자열 |
++| `PathBound(path)` | `"/status/rps"` | 데이터 모델에서 직접 읽기 |
++| `FormatStr(template)` | `"${/deploy/canary}% 전환"` | `${}` 보간 — 데이터 변경 시 자동 갱신 |
++
++### 3.2 A2UICondition (유효성 검사)
++
++| 타입 | 동작 |
++|---|---|
++| `Required(valuePath)` | 해당 경로 값이 비어있지 않으면 통과 (String, List, Boolean 지원) |
++| `Numeric(valuePath, min?, max?)` | 숫자 범위 검사 |
++| `PathRef(path)` | truthy 값이면 통과 |
++| `And(values)` | 모두 통과해야 통과 |
++| `Or(values)` | 하나라도 통과하면 통과 |
++
++Button의 `checks` 리스트에 넣으면 조건 불충족 시 버튼 비활성화 + 오류 메시지 표시.
++
++### 3.3 A2UIComponent 목록
++
++| 컴포넌트 | 주요 props | 비고 |
++|---|---|---|
++| `Card` | `child: String` | 단일 자식 래퍼. elevation 2dp. |
++| `Column` | `children`, `justify`, `align` | `justify`: start/end/center/spaceBetween |
++| `Row` | `children`, `justify`, `align` | 같음 |
++| `TextComp` | `text: A2UIValue`, `variant` | variant: h1/h2/caption/body |
++| `IconComp` | `name`, `size` | alert/activity/chart/check/settings/search 등 |
++| `Divider` | — | `HorizontalDivider` |
++| `ButtonComp` | `label`, `variant`, `action`, `checks` | variant: primary/secondary/borderless |
++| `TextFieldComp` | `label`, `valuePath`, `variant` | variant: shortText/longText |
++| `CheckBoxComp` | `label`, `valuePath` | — |
++| `ChoicePickerComp` | `options`, `valuePath`, `variant` | variant: mutuallyExclusive/multiple → FilterChip |
++| `SliderComp` | `label`, `valuePath`, `min`, `max`, `step` | — |
++| `SwitchComp` | `label`, `valuePath` | — |
++| `TagInputComp` | `label`, `valuePath`, `suggestions` | 제안 칩 + 커스텀 입력 + InputChip 태그 |
++| `SelectComp` | `label`, `valuePath`, `options` | ExposedDropdownMenu |
++| `RiskCardList` | `rowsPath` | 모바일용 위험성평가 카드 리스트 (DataTable 대체) |
++
++### 3.4 A2UISurface
++
++```kotlin
++data class A2UISurface(
++    val surfaceId: String,           // 고유 ID (시나리오명 + 타임스탬프)
++    val primaryColor: Color,         // 테마 색상 (버튼, 아이콘, 체크박스 등에 적용)
++    val agentDisplayName: String,    // 서피스 생성 에이전트 이름 (현재 미표시, 향후 헤더용)
++    val components: Map<String, A2UIComponent>,  // 컴포넌트 ID → 컴포넌트 트리
++    val rootId: String = "root",     // 렌더링 진입점
++    val dataModel: MutableMap<String, Any?>,     // JSON Pointer 네비게이션 가능 중첩 맵
++    val sendDataModel: Boolean = true,           // 버튼 액션 시 전체 모델 포함 여부
++)
++```
++
++---
++
++## 4. A2UIRuntime — 실행 엔진
++
++### 4.1 JSON Pointer 경로 해석
++
++```kotlin
++// 읽기: /incident/summary → map["incident"]["summary"]
++getAtPath(model, "/incident/summary")
++
++// 쓰기: /deploy/canary = 25
++setAtPath(model, "/deploy/canary", 25)
++```
++
++중간 경로가 없으면 자동 생성 (`mutableMapOf`).
++
++### 4.2 FormatString 보간
++
++```kotlin
++resolveFormatString("신버전으로 \${/deploy/canary}% 전환합니다.", model)
++// → "신버전으로 25% 전환합니다."
++```
++
++`A2UINode`는 `TextComp(FormatStr(...))`를 렌더링할 때마다 호출되므로,  
++Slider 조작 → 데이터 모델 변경 → surface 교체 → recomposition → 텍스트 자동 갱신.
++
++### 4.3 조건 평가
++
++```kotlin
++// 배포 버튼 예시: healthOk=true AND canary >= 1
++val condition = A2UICondition.And(listOf(
++    A2UICondition.PathRef("/deploy/healthOk"),
++    A2UICondition.Numeric("/deploy/canary", min = 1.0),
++))
++evalCondition(condition, model)  // true/false
++```
++
++`checksPass(checks, model)` 가 false면 버튼 `enabled=false`.  
++`firstFailMessage(checks, model)` 가 오류 문자열 반환 → 버튼 아래 빨간 텍스트 표시.
++
++### 4.4 상태 불변성
++
++```kotlin
++// ViewModel에서 데이터 업데이트 시
++val newModel = deepCopyModel(surface.dataModel)   // deep copy
++setAtPath(newModel, path, value)                  // 변경
++val newSurface = surface.copy(dataModel = newModel)
++state.copy(surfaces = state.surfaces + (surfaceId to newSurface))
++```
++
++`MutableMap` 레퍼런스를 그대로 바꾸면 Compose가 변경을 감지 못함.  
++`deepCopyModel`로 새 인스턴스 생성 후 교체해야 recomposition 발동.
++
++---
++
++## 5. 4개 데모 시나리오
++
++### 5.1 인시던트 보고 폼
++
++**트리거 키워드:** `인시던트`, `incident`, `장애 보고`, `보고서 폼`, `인시던트 생성`
++
++**데이터 모델 초기값:**
++```json
++{ "incident": { "severity": "P2", "service": "order-service", "summary": "", "customerImpact": false } }
++```
++
++**컴포넌트 트리:**
++```
++Card
++└─ Column
++   ├─ Row: Icon(alert) + Text("인시던트 보고", h2)
++   ├─ Text("심각도", caption)
++   ├─ ChoicePicker(P1/P2/P3, mutuallyExclusive) → /incident/severity
++   ├─ TextField("영향 서비스") → /incident/service
++   ├─ TextField("증상 요약", longText, required) → /incident/summary
++   ├─ CheckBox("고객 영향") → /incident/customerImpact
++   └─ Button("인시던트 생성", primary, required check)
++         action: create_incident { service, severity, summary, customerImpact }
++```
++
++**액션 응답:** `✅ INC-XXXX 인시던트 생성 + 상세 정보`
++
++---
++
++### 5.2 카나리 배포 승인
++
++**트리거 키워드:** `배포`, `deploy`, `롤아웃`, `카나리`, `canary`, `배포 승인`
++
++**데이터 모델 초기값:**
++```json
++{ "deploy": { "canary": 10, "healthOk": false } }
++```
++
++**컴포넌트 트리:**
++```
++Card
++└─ Column
++   ├─ Text("카나리 배포 승인", h2)
++   ├─ Text("payment-service · v2.4.1 → production", caption)
++   ├─ Slider(0~100, step=5) → /deploy/canary
++   ├─ Text(FormatStr: "신버전으로 ${/deploy/canary}% 전환")  ← 실시간 갱신
++   ├─ Divider
++   ├─ CheckBox("헬스체크 확인") → /deploy/healthOk
++   └─ Row
++      ├─ Button("취소", borderless) → cancel_deploy
++      └─ Button("배포 시작", primary, And(healthOk, canary≥1))
++            action: start_deploy { service, version, canary, healthOk }
++```
++
++**핵심:** Slider 움직일 때마다 FormatStr 텍스트가 즉시 갱신됨.
++
++---
++
++### 5.3 서비스 상태 카드
++
++**트리거 키워드:** `상태 카드`, `서비스 상태`, `status card`, `상태 대시보드`, `헬스 카드`
++
++**데이터 모델 초기값:**
++```json
++{ "status": { "range": "1h", "p99": 842, "errorRate": 1.3, "rps": "2.4k" } }
++```
++
++**컴포넌트 트리:**
++```
++Card
++└─ Column
++   ├─ Row: Icon(activity) + Text("payment-service 상태", h2)
++   ├─ ChoicePicker(15분/1시간/24시간) → /status/range
++   ├─ Divider
++   ├─ Row(spaceBetween)
++   │  ├─ Column: Text("${/status/p99}ms", h1) + Text("p99 지연", caption)
++   │  ├─ Column: Text("${/status/errorRate}%", h1) + Text("에러율", caption)
++   │  └─ Column: Text(/status/rps, h1) + Text("RPS", caption)
++   └─ Button("새로고침", secondary)
++         action: refresh_status { range }
++```
++
++**특징:** 표시 전용 바인딩 (입력 없음). 기간 선택 + 새로고침 액션만 존재.
++
++---
++
++### 5.4 위험성평가 자동 생성
++
++**트리거 키워드:** `위험성평가`, `위험 평가`, `리스크 평가`, `안전 점검`, `작업 위험`
++
++**입력 폼 데이터 모델:**
++```json
++{ "risk": { "trades": [], "location": "일반", "equip": "", "count": "5" } }
++```
++
++**입력 폼 컴포넌트:**
++```
++Card
++└─ Column
++   ├─ Text("위험성평가 자동 생성", h2)
++   ├─ TagInput("공종 선택", suggestions=[배관,용접,비계,전기,굴착,도장]) → /risk/trades
++   ├─ Select("작업 장소", [일반/지상/고소/지하/밀폐공간]) → /risk/location
++   ├─ TextField("사용 장비") → /risk/equip
++   ├─ Select("공종당 항목 수", [3/5/8/10]) → /risk/count
++   └─ Button("AI 위험성평가 생성", primary, Required(/risk/trades))
++         action: generate_risk { trades, count, location, equip }
++```
++
++**generate_risk 액션 처리:**
++1. `A2UIScenarios.buildRiskResultSurface(trades, count)` 호출
++2. 내장 `HAZARD_DB`에서 공종별 위험 항목 조회
++3. 결과 서피스를 새 AI 메시지에 첨부
++
++**결과 서피스:**
++```
++Card
++└─ Column
++   ├─ Text("N개 공종 · 총 M건 · 고위험 K건", caption)
++   ├─ Divider
++   └─ RiskCardList  ← 위험 항목을 카드 리스트로 표시
++```
++
++**RiskRowCard 구조 (항목당):**
++```
++Card
++└─ Column
++   ├─ Row: "N. 공종명" + 위험도 배지 (상=빨강/중=주황/하=초록)
++   ├─ Text: 작업 내용
++   ├─ Text: 재해 원인 (회색, 2줄)
++   └─ Text: 개선 대책 (초록)
++```
++
++---
++
++## 6. 키워드 매칭 로직
++
++```kotlin
++// ChatViewModel.submitUserPrompt()
++val scenario = A2UIScenarios.match(prompt)
++if (scenario != null) {
++    val surface = scenario.surface()           // 서피스 생성
++    val aiMsg = ChatMessage(
++        text = scenario.replyMd,               // 안내 텍스트
++        senderType = SenderType.AI,
++        surfaceId = surface.surfaceId,         // 서피스 연결
++    )
++    _state.update {
++        it.copy(
++            messages = it.messages + userMsg + aiMsg,
++            surfaces = it.surfaces + (surface.surfaceId to surface),
++        )
++    }
++    return   // 서버 호출 없음
++}
++// 키워드 미매칭 → 서버 HTTP POST 스트리밍
++```
++
++---
++
++## 7. 확장 가이드
++
++### 새 시나리오 추가
++
++```kotlin
++// A2UIScenarios.kt
++val ALL = listOf(
++    // ... 기존 4개 ...
++    Scenario(
++        keys = listOf("새 키워드"),
++        replyMd = "안내 텍스트 (**마크다운** 지원)",
++        surface = ::myNewSurface,
++    ),
++)
++
++fun myNewSurface(): A2UISurface = A2UISurface(
++    surfaceId = "my_surface_${System.currentTimeMillis()}",
++    primaryColor = Color(0xFF...),
++    agentDisplayName = "My Bot",
++    components = mapOf( /* 컴포넌트 트리 */ ),
++    dataModel = mutableMapOf( /* 초기값 */ ),
++)
++```
++
++### 새 액션 추가
++
++```kotlin
++// ChatViewModel.onA2UIAction()
++"my_action" -> {
++    val value = context["key"]?.toString() ?: ""
++    addAiReply("처리 결과: $value")
++}
++```
++
++### 새 컴포넌트 추가
++
++1. `A2UIModel.kt`의 `A2UIComponent` sealed class에 data class 추가.
++2. `A2UIRenderer.kt`의 `A2UINode` when 절에 렌더링 코드 추가.
++
++---
++
++## 8. 서버 연동 확장 (향후)
++
++현재는 데모 시나리오만 지원 (로컬 키워드 매칭).  
++실제 서버가 A2UI 엔벨로프를 반환하도록 확장하려면:
++
++1. HTTP POST 응답 스트림에서 `\n` 구분 JSONL 파싱 추가.
++2. 각 라인이 `{"version":"v0.9","createSurface":{...}}` 형태면 서피스 상태 업데이트.
++3. 일반 텍스트 청크는 기존대로 `appendChunkToMessage` 처리.
++
++---
++
++## 9. 버전 이력
++
++| 버전 | 날짜 | 내용 |
++|---|---|---|
++| 1.0 | 2026-06-17 | 최초 작성. A2UI v0.9 Kotlin/Compose 포트, 4개 데모 시나리오 포함. |
+-- 
+2.43.0
+

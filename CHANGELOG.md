@@ -5,6 +5,79 @@
 
 ---
 
+## [1.4.0] - 2026-06-17
+
+A2UI v0.9 — AI 에이전트가 채팅 안에서 인터랙티브 UI 서피스를 직접 생성하는 생성형 UI 레이어 추가.
+
+### Added
+
+- **`a2ui/` 패키지** — A2UI v0.9 런타임 전체를 Kotlin/Compose 네이티브로 구현.
+  - **`A2UIModel.kt`** — A2UI 전체 타입 시스템 정의.
+    - `A2UIValue` — `Static` / `PathBound` / `FormatStr` 3종 값 바인딩 타입.
+    - `A2UICondition` — `Required` / `Numeric` / `And` / `Or` 조건 트리 (버튼 유효성 검사용).
+    - `A2UIComponent` (sealed) — `Card`, `Column`, `Row`, `TextComp`, `IconComp`, `Divider`, `ButtonComp`, `TextFieldComp`, `CheckBoxComp`, `ChoicePickerComp`, `SliderComp`, `SwitchComp`, `TagInputComp`, `SelectComp`, `RiskCardList` 14종.
+    - `A2UISurface` — 서피스 상태 (컴포넌트 트리 + 데이터 모델 + 테마).
+  - **`A2UIRuntime.kt`** — A2UI 실행 엔진.
+    - JSON Pointer(RFC 6901) 경로 해석 (`getAtPath` / `setAtPath`).
+    - `formatString` 보간 — `${/deploy/canary}%` 형태의 템플릿을 데이터 모델 값으로 실시간 치환.
+    - 조건 평가 (`evalCondition`) — 중첩 `And/Or/Numeric/Required` 재귀 평가.
+    - `deepCopyModel` — 상태 업데이트 시 불변성 보장을 위한 데이터 모델 deep copy.
+  - **`A2UIScenarios.kt`** — 4개 데모 시나리오 정의 및 키워드 자동 매칭.
+    - **인시던트 보고 폼** (`인시던트`, `incident`, `장애 보고` 등) — ChoicePicker(P1/P2/P3) + TextField(서비스/증상) + CheckBox(고객 영향) + required 유효성 버튼.
+    - **카나리 배포 승인** (`배포`, `deploy`, `카나리` 등) — Slider(트래픽 %) + formatString 실시간 텍스트 + CheckBox(헬스체크) + `And(healthOk, numeric(canary, min=1))` 복합 조건 버튼.
+    - **서비스 상태 카드** (`상태 카드`, `서비스 상태` 등) — FormatStr 바인딩 메트릭(p99/에러율/RPS) + ChoicePicker 기간 선택 + 새로고침 액션.
+    - **위험성평가 자동 생성** (`위험성평가`, `위험 평가` 등) — TagInput(공종) + Select(장소/항목 수) + 생성 후 결과 카드 리스트.
+    - 6개 공종(배관·용접·비계·전기·굴착·도장) × 5개 항목 샘플 위험성평가 데이터 내장.
+  - **`A2UIRenderer.kt`** — `A2UINode` Composable 재귀 렌더러 (웹앱 `a2ui.jsx`의 Compose 포트).
+    - `A2UISurfaceView` — 서피스 진입점 Composable.
+    - 모든 14종 컴포넌트 Compose 구현 (`FilterChip`, `Slider`, `ExposedDropdownMenu`, `InputChip`, `FlowRow` 등 Material3 활용).
+    - `RiskRowCard` — DataTable 대신 모바일 최적화 리스크 카드 (위험도별 색상 배지).
+
+- **`ChatMessage.surfaceId: String?`** — AI 메시지가 A2UI 서피스를 선택적으로 보유할 수 있도록 필드 추가.
+- **`ChatState.surfaces: Map<String, A2UISurface>`** — 활성 서피스 상태를 ViewModel이 중앙 관리.
+- **`ChatViewModel.onA2UIData()`** — 폼 입력 변경 시 JSON Pointer 경로로 데이터 모델 업데이트. deep copy로 불변성 보장.
+- **`ChatViewModel.onA2UIAction()`** — 버튼 액션 이벤트 처리.
+  - `create_incident` → 인시던트 번호 채번 + 접수 확인 메시지.
+  - `start_deploy` → 카나리 배포 시작 메시지.
+  - `cancel_deploy` → 취소 메시지.
+  - `refresh_status` → 지표 재조회 메시지.
+  - `generate_risk` → 공종별 위험성평가 결과 서피스 생성 후 채팅에 삽입.
+- **`ChatScreen.AiMessage()`** — 마크다운 아래에 `A2UISurfaceView` 조건부 렌더링 추가.
+- **문서 추가**: `app/docs/08_a2ui_generative_ui.md` — A2UI 프로토콜, 컴포넌트 레퍼런스, 데이터 바인딩, 시나리오별 동작 흐름.
+
+### Changed
+
+- **`ChatViewModel.submitUserPrompt()`** — 키워드 감지 시 서버 호출 없이 로컬 시나리오 응답으로 단락. 매칭 없는 일반 메시지는 기존 HTTP POST 스트리밍 유지.
+- **`ChatScreen.MessageList()`** — `surfaces`, `onA2UIData`, `onA2UIAction` 파라미터 추가.
+
+---
+
+## [1.3.0] - 2026-06-17
+
+ncloud 연동 — 서버 통신 프로토콜을 WebSocket에서 HTTP POST 청크 스트리밍으로 전환. `feature/ncloud-integration` 브랜치.
+
+### Added
+
+- **`local.properties` 설정값 추가** — `SERVER_URL=http://223.130.159.179:8000/chat/stream`. `WS_API_KEY` 는 현재 미사용(서버 인증 없음).
+
+### Changed
+
+- **`RemoteAiRepository.kt`** — WebSocket(OkHttp `WebSocketListener`) → HTTP POST 청크 스트리밍으로 전면 재작성.
+  - 요청: `POST /chat/stream` · `Content-Type: application/json` · body `{"session_id": "<uuid>", "message": "<text>"}`.
+  - 응답: chunked transfer-encoding 텍스트 스트림. `okio.Buffer`로 8 KB 단위 읽기 → `Flow.emit`.
+  - 세션 ID는 앱 실행 동안 고정 UUID — 서버 측 멀티턴 대화 컨텍스트 유지.
+  - `connectTimeout` 10 s / `readTimeout` 120 s (스트리밍 응답 대비).
+  - WebSocket 관련 import(`WebSocketListener`, `WebSocket`, `response.handleText` 등) 전량 제거.
+  - `@Suppress("UNUSED_PARAMETER") apiKey` 파라미터 보존 — 향후 인증 도입 대비 인터페이스 시그니처 유지.
+- **`app/docs/03_server_api.md`** — ncloud HTTP POST 규격 섹션 추가 (v1.3).
+
+### Removed
+
+- WebSocket keepalive (`pingInterval`, `ProcessLifecycleOwner` 옵저버, `connectionMutex`, `isConnectionAlive` 플래그) — HTTP POST는 연결 유지가 불필요하므로 전량 제거.
+- `kotlinx.serialization`의 `TextInput` / `InboundMessage` 봉인 클래스 — HTTP POST 응답은 평문 텍스트 청크이므로 JSON 파싱 불필요.
+
+---
+
 ## [1.2.0] - 2026-05-18
 
 Phase 2 UI — AI 답변 마크다운 렌더링, 메시지별 TTS 토글, 인라인 음성 받아쓰기.
