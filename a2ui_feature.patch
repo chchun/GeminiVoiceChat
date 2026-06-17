@@ -1,0 +1,1415 @@
+From c43accb7a75452f0bd09ae2425aea485e8c498f1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 17 Jun 2026 12:29:13 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20A2UI=20v0.9=20generative=20UI=20?=
+ =?UTF-8?q?=E2=80=94=204=20demo=20scenarios=20(incident/deploy/status/risk?=
+ =?UTF-8?q?)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../aromit/geminivoicechat/a2ui/A2UIModel.kt  | 116 ++++
+ .../geminivoicechat/a2ui/A2UIRenderer.kt      | 536 ++++++++++++++++++
+ .../geminivoicechat/a2ui/A2UIRuntime.kt       | 100 ++++
+ .../geminivoicechat/a2ui/A2UIScenarios.kt     | 345 +++++++++++
+ .../domain/model/ChatMessage.kt               |   3 +-
+ .../geminivoicechat/ui/chat/ChatScreen.kt     |  47 +-
+ .../geminivoicechat/ui/chat/ChatState.kt      |   4 +-
+ .../geminivoicechat/ui/chat/ChatViewModel.kt  | 111 +++-
+ 8 files changed, 1242 insertions(+), 20 deletions(-)
+ create mode 100644 app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIModel.kt
+ create mode 100644 app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRenderer.kt
+ create mode 100644 app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRuntime.kt
+ create mode 100644 app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIScenarios.kt
+
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIModel.kt b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIModel.kt
+new file mode 100644
+index 0000000..5a1dc70
+--- /dev/null
++++ b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIModel.kt
+@@ -0,0 +1,116 @@
++package com.aromit.geminivoicechat.a2ui
++
++import androidx.compose.ui.graphics.Color
++
++// ── Value binding types ──────────────────────────────────────
++sealed class A2UIValue {
++    data class Static(val text: String) : A2UIValue()
++    data class PathBound(val path: String) : A2UIValue()
++    data class FormatStr(val template: String) : A2UIValue()
++}
++
++// ── Validation conditions ────────────────────────────────────
++sealed class A2UICondition {
++    data class PathRef(val path: String) : A2UICondition()
++    data class Required(val valuePath: String) : A2UICondition()
++    data class Numeric(val valuePath: String, val min: Double? = null, val max: Double? = null) : A2UICondition()
++    data class And(val values: List<A2UICondition>) : A2UICondition()
++    data class Or(val values: List<A2UICondition>) : A2UICondition()
++}
++
++data class A2UICheck(val condition: A2UICondition, val message: String)
++
++// ── Actions ──────────────────────────────────────────────────
++data class A2UIContextRef(
++    val key: String,
++    val path: String? = null,
++    val literal: String? = null,
++)
++
++data class A2UIAction(
++    val eventName: String,
++    val contextRefs: List<A2UIContextRef> = emptyList(),
++    val extraLiterals: Map<String, String> = emptyMap(),
++)
++
++// ── Picker option ────────────────────────────────────────────
++data class A2UIOption(val label: String, val value: String)
++
++// ── Component tree ───────────────────────────────────────────
++sealed class A2UIComponent {
++    abstract val id: String
++
++    data class Card(override val id: String, val child: String) : A2UIComponent()
++    data class Column(
++        override val id: String,
++        val children: List<String>,
++        val justify: String = "start",
++        val align: String = "start",
++    ) : A2UIComponent()
++    data class Row(
++        override val id: String,
++        val children: List<String>,
++        val justify: String = "start",
++        val align: String = "center",
++    ) : A2UIComponent()
++    data class TextComp(override val id: String, val text: A2UIValue, val variant: String = "body") : A2UIComponent()
++    data class IconComp(override val id: String, val name: String, val size: Int = 20) : A2UIComponent()
++    data class Divider(override val id: String) : A2UIComponent()
++    data class ButtonComp(
++        override val id: String,
++        val label: A2UIValue,
++        val variant: String = "primary",
++        val action: A2UIAction?,
++        val checks: List<A2UICheck> = emptyList(),
++    ) : A2UIComponent()
++    data class TextFieldComp(
++        override val id: String,
++        val label: String,
++        val valuePath: String,
++        val variant: String = "shortText",
++        val placeholder: String = "",
++        val checks: List<A2UICheck> = emptyList(),
++    ) : A2UIComponent()
++    data class CheckBoxComp(override val id: String, val label: String, val valuePath: String) : A2UIComponent()
++    data class ChoicePickerComp(
++        override val id: String,
++        val options: List<A2UIOption>,
++        val valuePath: String,
++        val variant: String = "mutuallyExclusive",
++    ) : A2UIComponent()
++    data class SliderComp(
++        override val id: String,
++        val label: String,
++        val valuePath: String,
++        val min: Float,
++        val max: Float,
++        val step: Float,
++    ) : A2UIComponent()
++    data class SwitchComp(override val id: String, val label: String, val valuePath: String) : A2UIComponent()
++    data class TagInputComp(
++        override val id: String,
++        val label: String,
++        val valuePath: String,
++        val suggestions: List<String> = emptyList(),
++        val placeholder: String = "",
++    ) : A2UIComponent()
++    data class SelectComp(
++        override val id: String,
++        val label: String,
++        val valuePath: String,
++        val options: List<A2UIOption>,
++        val placeholder: String = "",
++    ) : A2UIComponent()
++    data class RiskCardList(override val id: String, val rowsPath: String) : A2UIComponent()
++}
++
++// ── Surface ──────────────────────────────────────────────────
++data class A2UISurface(
++    val surfaceId: String,
++    val primaryColor: Color,
++    val agentDisplayName: String,
++    val components: Map<String, A2UIComponent>,
++    val rootId: String = "root",
++    val dataModel: MutableMap<String, Any?> = mutableMapOf(),
++    val sendDataModel: Boolean = true,
++)
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRenderer.kt b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRenderer.kt
+new file mode 100644
+index 0000000..3f88ee1
+--- /dev/null
++++ b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRenderer.kt
+@@ -0,0 +1,536 @@
++package com.aromit.geminivoicechat.a2ui
++
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.ExperimentalLayoutApi
++import androidx.compose.foundation.layout.FlowRow
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.Add
++import androidx.compose.material.icons.filled.Close
++import androidx.compose.material.icons.filled.CheckCircle
++import androidx.compose.material.icons.filled.Info
++import androidx.compose.material.icons.filled.Settings
++import androidx.compose.material.icons.filled.Search
++import androidx.compose.material.icons.filled.ShowChart
++import androidx.compose.material.icons.filled.Warning
++import androidx.compose.material3.Button
++import androidx.compose.material3.ButtonDefaults
++import androidx.compose.material3.Card
++import androidx.compose.material3.CardDefaults
++import androidx.compose.material3.Checkbox
++import androidx.compose.material3.CheckboxDefaults
++import androidx.compose.material3.DropdownMenuItem
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.ExposedDropdownMenuBox
++import androidx.compose.material3.ExposedDropdownMenuDefaults
++import androidx.compose.material3.FilterChip
++import androidx.compose.material3.FilterChipDefaults
++import androidx.compose.material3.HorizontalDivider
++import androidx.compose.material3.Icon
++import androidx.compose.material3.IconButton
++import androidx.compose.material3.InputChip
++import androidx.compose.material3.InputChipDefaults
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.OutlinedButton
++import androidx.compose.material3.OutlinedTextField
++import androidx.compose.material3.Slider
++import androidx.compose.material3.SliderDefaults
++import androidx.compose.material3.SuggestionChip
++import androidx.compose.material3.Switch
++import androidx.compose.material3.SwitchDefaults
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.dp
++
++@Composable
++fun A2UISurfaceView(
++    surface: A2UISurface,
++    onData: (path: String, value: Any?) -> Unit,
++    onAction: (eventName: String, context: Map<String, Any?>) -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    A2UINode(
++        componentId = surface.rootId,
++        surface = surface,
++        onData = onData,
++        onAction = onAction,
++        modifier = modifier,
++    )
++}
++
++@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
++@Composable
++fun A2UINode(
++    componentId: String,
++    surface: A2UISurface,
++    onData: (path: String, value: Any?) -> Unit,
++    onAction: (eventName: String, context: Map<String, Any?>) -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    val component = surface.components[componentId] ?: return
++    val model = surface.dataModel
++    val primary = surface.primaryColor
++
++    when (component) {
++        is A2UIComponent.Card -> {
++            Card(
++                modifier = modifier.fillMaxWidth(),
++                shape = RoundedCornerShape(12.dp),
++                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
++            ) {
++                Column(modifier = Modifier.padding(16.dp)) {
++                    A2UINode(component.child, surface, onData, onAction)
++                }
++            }
++        }
++
++        is A2UIComponent.Column -> {
++            Column(
++                modifier = modifier,
++                verticalArrangement = when (component.justify) {
++                    "spaceBetween" -> Arrangement.SpaceBetween
++                    "spaceAround" -> Arrangement.SpaceAround
++                    "end" -> Arrangement.Bottom
++                    "center" -> Arrangement.Center
++                    else -> Arrangement.spacedBy(10.dp)
++                },
++                horizontalAlignment = when (component.align) {
++                    "center" -> Alignment.CenterHorizontally
++                    "end" -> Alignment.End
++                    else -> Alignment.Start
++                },
++            ) {
++                component.children.forEach { childId ->
++                    A2UINode(childId, surface, onData, onAction)
++                }
++            }
++        }
++
++        is A2UIComponent.Row -> {
++            Row(
++                modifier = modifier.fillMaxWidth(),
++                horizontalArrangement = when (component.justify) {
++                    "spaceBetween" -> Arrangement.SpaceBetween
++                    "spaceAround" -> Arrangement.SpaceAround
++                    "end" -> Arrangement.End
++                    "center" -> Arrangement.Center
++                    else -> Arrangement.spacedBy(8.dp)
++                },
++                verticalAlignment = when (component.align) {
++                    "start" -> Alignment.Top
++                    "end" -> Alignment.Bottom
++                    else -> Alignment.CenterVertically
++                },
++            ) {
++                component.children.forEach { childId ->
++                    A2UINode(childId, surface, onData, onAction)
++                }
++            }
++        }
++
++        is A2UIComponent.TextComp -> {
++            val text = resolveValue(component.text, model)
++            when (component.variant) {
++                "h1" -> Text(text,
++                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold))
++                "h2" -> Text(text,
++                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
++                "caption" -> Text(text,
++                    style = MaterialTheme.typography.labelSmall,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant)
++                else -> Text(text, style = MaterialTheme.typography.bodyMedium)
++            }
++        }
++
++        is A2UIComponent.IconComp -> {
++            val imageVector = when (component.name) {
++                "alert", "warning" -> Icons.Filled.Warning
++                "activity", "chart", "show_chart" -> Icons.Filled.ShowChart
++                "check", "check_circle" -> Icons.Filled.CheckCircle
++                "settings" -> Icons.Filled.Settings
++                "search" -> Icons.Filled.Search
++                else -> Icons.Filled.Info
++            }
++            Icon(
++                imageVector = imageVector,
++                contentDescription = component.name,
++                modifier = Modifier.size(component.size.dp),
++                tint = primary,
++            )
++        }
++
++        is A2UIComponent.Divider -> {
++            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
++        }
++
++        is A2UIComponent.ButtonComp -> {
++            val label = resolveValue(component.label, model)
++            val enabled = checksPass(component.checks, model)
++            val errorMsg = if (!enabled) firstFailMessage(component.checks, model) else null
++            Column(modifier = modifier) {
++                when (component.variant) {
++                    "primary" -> Button(
++                        onClick = {
++                            component.action?.let { a ->
++                                onAction(a.eventName, resolveContext(a.contextRefs, a.extraLiterals, model))
++                            }
++                        },
++                        enabled = enabled,
++                        colors = ButtonDefaults.buttonColors(containerColor = primary),
++                        modifier = Modifier.fillMaxWidth(),
++                    ) { Text(label) }
++
++                    "secondary" -> OutlinedButton(
++                        onClick = {
++                            component.action?.let { a ->
++                                onAction(a.eventName, resolveContext(a.contextRefs, a.extraLiterals, model))
++                            }
++                        },
++                        enabled = enabled,
++                        modifier = Modifier.fillMaxWidth(),
++                    ) { Text(label) }
++
++                    "borderless" -> TextButton(
++                        onClick = {
++                            component.action?.let { a ->
++                                onAction(a.eventName, resolveContext(a.contextRefs, a.extraLiterals, model))
++                            }
++                        },
++                    ) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) }
++
++                    else -> Button(
++                        onClick = {
++                            component.action?.let { a ->
++                                onAction(a.eventName, resolveContext(a.contextRefs, a.extraLiterals, model))
++                            }
++                        },
++                        enabled = enabled,
++                        modifier = Modifier.fillMaxWidth(),
++                    ) { Text(label) }
++                }
++                if (errorMsg != null) {
++                    Text(
++                        text = errorMsg,
++                        style = MaterialTheme.typography.labelSmall,
++                        color = MaterialTheme.colorScheme.error,
++                        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
++                    )
++                }
++            }
++        }
++
++        is A2UIComponent.TextFieldComp -> {
++            val value = getAtPath(model, component.valuePath)?.toString() ?: ""
++            OutlinedTextField(
++                value = value,
++                onValueChange = { onData(component.valuePath, it) },
++                label = { Text(component.label) },
++                placeholder = { Text(component.placeholder) },
++                maxLines = if (component.variant == "longText") 5 else 1,
++                minLines = if (component.variant == "longText") 3 else 1,
++                modifier = modifier.fillMaxWidth(),
++            )
++        }
++
++        is A2UIComponent.CheckBoxComp -> {
++            val checked = getAtPath(model, component.valuePath) as? Boolean ?: false
++            Row(
++                verticalAlignment = Alignment.CenterVertically,
++                modifier = modifier
++                    .fillMaxWidth()
++                    .clickable { onData(component.valuePath, !checked) },
++            ) {
++                Checkbox(
++                    checked = checked,
++                    onCheckedChange = { onData(component.valuePath, it) },
++                    colors = CheckboxDefaults.colors(checkedColor = primary),
++                )
++                Spacer(Modifier.width(4.dp))
++                Text(component.label, style = MaterialTheme.typography.bodyMedium)
++            }
++        }
++
++        is A2UIComponent.ChoicePickerComp -> {
++            val isMultiple = component.variant == "multiple"
++            @Suppress("UNCHECKED_CAST")
++            val selectedList: List<String> = if (isMultiple) {
++                (getAtPath(model, component.valuePath) as? List<String>) ?: emptyList()
++            } else emptyList()
++            val singleSelected = if (!isMultiple) getAtPath(model, component.valuePath)?.toString() else null
++
++            FlowRow(
++                horizontalArrangement = Arrangement.spacedBy(8.dp),
++                verticalArrangement = Arrangement.spacedBy(6.dp),
++                modifier = modifier,
++            ) {
++                component.options.forEach { option ->
++                    val selected = if (isMultiple) selectedList.contains(option.value)
++                                   else singleSelected == option.value
++                    FilterChip(
++                        selected = selected,
++                        onClick = {
++                            if (isMultiple) {
++                                val newList = if (selected) selectedList - option.value
++                                             else selectedList + option.value
++                                onData(component.valuePath, newList.toMutableList())
++                            } else {
++                                onData(component.valuePath, option.value)
++                            }
++                        },
++                        label = { Text(option.label) },
++                        colors = FilterChipDefaults.filterChipColors(
++                            selectedContainerColor = primary.copy(alpha = 0.15f),
++                            selectedLabelColor = primary,
++                        ),
++                    )
++                }
++            }
++        }
++
++        is A2UIComponent.SliderComp -> {
++            val value = (getAtPath(model, component.valuePath) as? Number)?.toFloat() ?: component.min
++            Column(modifier = modifier) {
++                Row(
++                    modifier = Modifier.fillMaxWidth(),
++                    horizontalArrangement = Arrangement.SpaceBetween,
++                ) {
++                    Text(component.label, style = MaterialTheme.typography.labelMedium)
++                    Text("${value.toInt()}%",
++                        style = MaterialTheme.typography.labelMedium,
++                        color = primary,
++                        fontWeight = FontWeight.SemiBold)
++                }
++                Slider(
++                    value = value,
++                    onValueChange = { onData(component.valuePath, it.toInt()) },
++                    valueRange = component.min..component.max,
++                    steps = ((component.max - component.min) / component.step).toInt() - 1,
++                    colors = SliderDefaults.colors(thumbColor = primary, activeTrackColor = primary),
++                    modifier = Modifier.fillMaxWidth(),
++                )
++            }
++        }
++
++        is A2UIComponent.SwitchComp -> {
++            val on = getAtPath(model, component.valuePath) as? Boolean ?: false
++            Row(
++                modifier = modifier.fillMaxWidth(),
++                horizontalArrangement = Arrangement.SpaceBetween,
++                verticalAlignment = Alignment.CenterVertically,
++            ) {
++                Text(component.label, style = MaterialTheme.typography.bodyMedium)
++                Switch(
++                    checked = on,
++                    onCheckedChange = { onData(component.valuePath, it) },
++                    colors = SwitchDefaults.colors(
++                        checkedThumbColor = Color.White,
++                        checkedTrackColor = primary,
++                    ),
++                )
++            }
++        }
++
++        is A2UIComponent.TagInputComp -> {
++            @Suppress("UNCHECKED_CAST")
++            val tags: List<String> = (getAtPath(model, component.valuePath) as? List<String>) ?: emptyList()
++            var inputText by remember { mutableStateOf("") }
++            Column(modifier = modifier) {
++                Text(component.label,
++                    style = MaterialTheme.typography.labelMedium,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant)
++                Spacer(Modifier.height(6.dp))
++                // Suggestion chips (unselected suggestions only)
++                val unselected = component.suggestions.filter { !tags.contains(it) }
++                if (unselected.isNotEmpty()) {
++                    FlowRow(
++                        horizontalArrangement = Arrangement.spacedBy(6.dp),
++                        verticalArrangement = Arrangement.spacedBy(6.dp),
++                    ) {
++                        unselected.forEach { s ->
++                            SuggestionChip(
++                                onClick = { onData(component.valuePath, (tags + s).toMutableList()) },
++                                label = { Text(s, style = MaterialTheme.typography.labelSmall) },
++                            )
++                        }
++                    }
++                    Spacer(Modifier.height(4.dp))
++                }
++                // Selected tags
++                if (tags.isNotEmpty()) {
++                    FlowRow(
++                        horizontalArrangement = Arrangement.spacedBy(6.dp),
++                        verticalArrangement = Arrangement.spacedBy(6.dp),
++                    ) {
++                        tags.forEach { tag ->
++                            InputChip(
++                                selected = true,
++                                onClick = { onData(component.valuePath, tags.filterNot { it == tag }.toMutableList()) },
++                                label = { Text(tag) },
++                                trailingIcon = {
++                                    Icon(Icons.Filled.Close, contentDescription = "제거",
++                                        modifier = Modifier.size(14.dp))
++                                },
++                                colors = InputChipDefaults.inputChipColors(
++                                    selectedContainerColor = primary.copy(alpha = 0.15f),
++                                    selectedLabelColor = primary,
++                                ),
++                            )
++                        }
++                    }
++                    Spacer(Modifier.height(4.dp))
++                }
++                // Custom text input
++                OutlinedTextField(
++                    value = inputText,
++                    onValueChange = { inputText = it },
++                    placeholder = { Text(component.placeholder) },
++                    trailingIcon = {
++                        if (inputText.isNotBlank()) {
++                            IconButton(onClick = {
++                                val trimmed = inputText.trim()
++                                if (trimmed.isNotEmpty() && !tags.contains(trimmed)) {
++                                    onData(component.valuePath, (tags + trimmed).toMutableList())
++                                }
++                                inputText = ""
++                            }) {
++                                Icon(Icons.Filled.Add, contentDescription = "추가")
++                            }
++                        }
++                    },
++                    singleLine = true,
++                    modifier = Modifier.fillMaxWidth(),
++                )
++            }
++        }
++
++        is A2UIComponent.SelectComp -> {
++            var expanded by remember { mutableStateOf(false) }
++            val current = getAtPath(model, component.valuePath)?.toString() ?: ""
++            val currentLabel = component.options.firstOrNull { it.value == current }?.label
++                ?: component.placeholder.ifEmpty { "선택" }
++            Column(modifier = modifier) {
++                Text(component.label,
++                    style = MaterialTheme.typography.labelMedium,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant)
++                Spacer(Modifier.height(4.dp))
++                ExposedDropdownMenuBox(
++                    expanded = expanded,
++                    onExpandedChange = { expanded = !expanded },
++                ) {
++                    OutlinedTextField(
++                        value = currentLabel,
++                        onValueChange = {},
++                        readOnly = true,
++                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
++                        modifier = Modifier
++                            .fillMaxWidth()
++                            .menuAnchor(),
++                    )
++                    ExposedDropdownMenu(
++                        expanded = expanded,
++                        onDismissRequest = { expanded = false },
++                    ) {
++                        component.options.forEach { option ->
++                            DropdownMenuItem(
++                                text = { Text(option.label) },
++                                onClick = {
++                                    onData(component.valuePath, option.value)
++                                    expanded = false
++                                },
++                            )
++                        }
++                    }
++                }
++            }
++        }
++
++        is A2UIComponent.RiskCardList -> {
++            @Suppress("UNCHECKED_CAST")
++            val rows = (getAtPath(model, component.rowsPath) as? List<Map<String, Any?>>) ?: emptyList()
++            Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
++                rows.forEachIndexed { idx, row ->
++                    RiskRowCard(index = idx + 1, row = row)
++                }
++            }
++        }
++    }
++}
++
++@Composable
++private fun RiskRowCard(index: Int, row: Map<String, Any?>) {
++    val risk = row["risk"]?.toString() ?: "하"
++    val riskColor = when (risk) {
++        "상" -> Color(0xFFE5484D)
++        "중" -> Color(0xFFDD6B20)
++        else -> Color(0xFF1F8A5B)
++    }
++    Card(
++        modifier = Modifier.fillMaxWidth(),
++        shape = RoundedCornerShape(8.dp),
++        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
++    ) {
++        Column(
++            modifier = Modifier.padding(12.dp),
++            verticalArrangement = Arrangement.spacedBy(4.dp),
++        ) {
++            Row(
++                modifier = Modifier.fillMaxWidth(),
++                horizontalArrangement = Arrangement.SpaceBetween,
++                verticalAlignment = Alignment.CenterVertically,
++            ) {
++                Text(
++                    text = "$index. ${row["trade"] ?: ""}",
++                    style = MaterialTheme.typography.labelLarge,
++                    fontWeight = FontWeight.Bold,
++                )
++                Box(
++                    modifier = Modifier
++                        .background(riskColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
++                        .padding(horizontal = 8.dp, vertical = 2.dp),
++                ) {
++                    Text("위험 $risk",
++                        color = riskColor,
++                        style = MaterialTheme.typography.labelSmall,
++                        fontWeight = FontWeight.Bold)
++                }
++            }
++            Text(row["task"]?.toString() ?: "",
++                style = MaterialTheme.typography.bodyMedium,
++                fontWeight = FontWeight.Medium)
++            Text(row["cause"]?.toString() ?: "",
++                style = MaterialTheme.typography.bodySmall,
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++                maxLines = 2,
++                overflow = TextOverflow.Ellipsis)
++            val improve = row["improve"]?.toString()
++            if (!improve.isNullOrBlank()) {
++                Text("개선: $improve",
++                    style = MaterialTheme.typography.bodySmall,
++                    color = Color(0xFF0E7C66),
++                    maxLines = 2,
++                    overflow = TextOverflow.Ellipsis)
++            }
++        }
++    }
++}
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRuntime.kt b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRuntime.kt
+new file mode 100644
+index 0000000..cee57d9
+--- /dev/null
++++ b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIRuntime.kt
+@@ -0,0 +1,100 @@
++package com.aromit.geminivoicechat.a2ui
++
++// ── JSON Pointer (RFC 6901) helpers ──────────────────────────
++
++@Suppress("UNCHECKED_CAST")
++fun getAtPath(model: Map<String, Any?>, path: String): Any? {
++    val parts = path.trimStart('/').split('/').filter { it.isNotEmpty() }
++    var current: Any? = model
++    for (part in parts) {
++        current = (current as? Map<*, *>)?.get(part) ?: return null
++    }
++    return current
++}
++
++@Suppress("UNCHECKED_CAST")
++fun setAtPath(model: MutableMap<String, Any?>, path: String, value: Any?) {
++    val parts = path.trimStart('/').split('/').filter { it.isNotEmpty() }
++    if (parts.isEmpty()) return
++    var current: MutableMap<String, Any?> = model
++    for (i in 0 until parts.size - 1) {
++        val existing = current[parts[i]]
++        val next: MutableMap<String, Any?> = if (existing is MutableMap<*, *>) {
++            existing as MutableMap<String, Any?>
++        } else {
++            mutableMapOf<String, Any?>().also { current[parts[i]] = it }
++        }
++        current = next
++    }
++    current[parts.last()] = value
++}
++
++@Suppress("UNCHECKED_CAST")
++fun deepCopyModel(model: Map<String, Any?>): MutableMap<String, Any?> =
++    model.mapValues { (_, v) ->
++        when (v) {
++            is Map<*, *> -> deepCopyModel(v as Map<String, Any?>)
++            is MutableList<*> -> v.toMutableList()
++            is List<*> -> v.toMutableList()
++            else -> v
++        }
++    }.toMutableMap()
++
++// ── FormatString interpolation ───────────────────────────────
++
++fun resolveFormatString(template: String, model: Map<String, Any?>): String =
++    Regex("\\$\\{([^}]+)\\}").replace(template) { match ->
++        val expr = match.groupValues[1].trim()
++        val path = if (expr.startsWith('/')) expr else "/$expr"
++        getAtPath(model, path)?.toString() ?: ""
++    }
++
++fun resolveValue(value: A2UIValue, model: Map<String, Any?>): String = when (value) {
++    is A2UIValue.Static -> value.text
++    is A2UIValue.PathBound -> getAtPath(model, value.path)?.toString() ?: ""
++    is A2UIValue.FormatStr -> resolveFormatString(value.template, model)
++}
++
++// ── Condition evaluation ──────────────────────────────────────
++
++fun evalCondition(condition: A2UICondition, model: Map<String, Any?>): Boolean = when (condition) {
++    is A2UICondition.PathRef -> when (val v = getAtPath(model, condition.path)) {
++        null -> false
++        is Boolean -> v
++        is String -> v.isNotBlank()
++        is Number -> v.toDouble() != 0.0
++        is List<*> -> v.isNotEmpty()
++        else -> true
++    }
++    is A2UICondition.Required -> when (val v = getAtPath(model, condition.valuePath)) {
++        null -> false
++        is String -> v.isNotBlank()
++        is List<*> -> v.isNotEmpty()
++        else -> true
++    }
++    is A2UICondition.Numeric -> {
++        val num = (getAtPath(model, condition.valuePath) as? Number)?.toDouble() ?: return false
++        (condition.min == null || num >= condition.min) && (condition.max == null || num <= condition.max)
++    }
++    is A2UICondition.And -> condition.values.all { evalCondition(it, model) }
++    is A2UICondition.Or -> condition.values.any { evalCondition(it, model) }
++}
++
++fun checksPass(checks: List<A2UICheck>, model: Map<String, Any?>): Boolean =
++    checks.all { evalCondition(it.condition, model) }
++
++fun firstFailMessage(checks: List<A2UICheck>, model: Map<String, Any?>): String? =
++    checks.firstOrNull { !evalCondition(it.condition, model) }?.message
++
++// ── Context resolution ────────────────────────────────────────
++
++fun resolveContext(
++    refs: List<A2UIContextRef>,
++    extras: Map<String, String>,
++    model: Map<String, Any?>,
++): Map<String, Any?> = buildMap {
++    putAll(extras)
++    for (ref in refs) {
++        put(ref.key, if (ref.path != null) getAtPath(model, ref.path) else ref.literal)
++    }
++}
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIScenarios.kt b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIScenarios.kt
+new file mode 100644
+index 0000000..b441324
+--- /dev/null
++++ b/app/src/main/java/com/aromit/geminivoicechat/a2ui/A2UIScenarios.kt
+@@ -0,0 +1,345 @@
++package com.aromit.geminivoicechat.a2ui
++
++import androidx.compose.ui.graphics.Color
++
++object A2UIScenarios {
++
++    data class Scenario(
++        val keys: List<String>,
++        val replyMd: String,
++        val surface: () -> A2UISurface,
++    )
++
++    val ALL: List<Scenario> = listOf(
++        Scenario(
++            keys = listOf("인시던트", "장애 보고", "incident", "보고서 폼", "인시던트 생성"),
++            replyMd = "장애 내용을 바로 접수할 수 있도록 **인시던트 보고 폼**을 생성했어요. 아래에서 작성 후 제출하면 인시던트가 등록됩니다.",
++            surface = ::incidentSurface,
++        ),
++        Scenario(
++            keys = listOf("배포", "deploy", "롤아웃", "카나리", "canary", "배포 승인"),
++            replyMd = "프로덕션 **카나리 배포 승인 패널**을 준비했어요. 헬스체크를 확인하고 트래픽 비중을 정한 뒤 배포를 시작하세요.",
++            surface = ::deploySurface,
++        ),
++        Scenario(
++            keys = listOf("상태 카드", "서비스 상태", "status card", "상태 대시보드", "헬스 카드"),
++            replyMd = "`payment-service` 의 **실시간 상태 카드**입니다. 기간을 바꾸거나 새로고침을 누르면 에이전트가 지표를 다시 조회해요.",
++            surface = ::statusSurface,
++        ),
++        Scenario(
++            keys = listOf("위험성평가", "위험 평가", "리스크 평가", "안전 점검", "작업 위험"),
++            replyMd = "작업 공종과 환경 정보를 입력하면 AI가 **위험성평가 항목**을 자동으로 생성합니다.",
++            surface = ::riskSurface,
++        ),
++    )
++
++    fun match(text: String): Scenario? {
++        val lower = text.lowercase()
++        return ALL.firstOrNull { s -> s.keys.any { lower.contains(it.lowercase()) } }
++    }
++
++    // ─────────────────────────────────────────────────────────
++    // 1. Incident Report Form
++    // ─────────────────────────────────────────────────────────
++    fun incidentSurface(): A2UISurface = A2UISurface(
++        surfaceId = "incident_form_${System.currentTimeMillis()}",
++        primaryColor = Color(0xFFE5484D),
++        agentDisplayName = "Incident Bot",
++        components = mapOf(
++            "root" to A2UIComponent.Card("root", "form_col"),
++            "form_col" to A2UIComponent.Column("form_col",
++                children = listOf("hdr", "sev_label", "sev_pick", "svc_field", "sum_field", "impact_check", "submit_btn")),
++            "hdr" to A2UIComponent.Row("hdr", children = listOf("hdr_ico", "hdr_txt"), align = "center"),
++            "hdr_ico" to A2UIComponent.IconComp("hdr_ico", "alert", 20),
++            "hdr_txt" to A2UIComponent.TextComp("hdr_txt", A2UIValue.Static("인시던트 보고"), "h2"),
++            "sev_label" to A2UIComponent.TextComp("sev_label", A2UIValue.Static("심각도"), "caption"),
++            "sev_pick" to A2UIComponent.ChoicePickerComp("sev_pick",
++                options = listOf(
++                    A2UIOption("P1 · 치명적", "P1"),
++                    A2UIOption("P2 · 높음", "P2"),
++                    A2UIOption("P3 · 보통", "P3"),
++                ),
++                valuePath = "/incident/severity"),
++            "svc_field" to A2UIComponent.TextFieldComp("svc_field",
++                label = "영향 서비스", valuePath = "/incident/service",
++                placeholder = "예: order-service"),
++            "sum_field" to A2UIComponent.TextFieldComp("sum_field",
++                label = "증상 요약", valuePath = "/incident/summary",
++                variant = "longText", placeholder = "무슨 일이 발생했나요?",
++                checks = listOf(A2UICheck(A2UICondition.Required("/incident/summary"), "증상 요약은 필수입니다."))),
++            "impact_check" to A2UIComponent.CheckBoxComp("impact_check",
++                label = "고객 영향이 발생했습니다", valuePath = "/incident/customerImpact"),
++            "submit_btn" to A2UIComponent.ButtonComp("submit_btn",
++                label = A2UIValue.Static("인시던트 생성"), variant = "primary",
++                action = A2UIAction(
++                    eventName = "create_incident",
++                    contextRefs = listOf(
++                        A2UIContextRef("service", path = "/incident/service"),
++                        A2UIContextRef("severity", path = "/incident/severity"),
++                        A2UIContextRef("summary", path = "/incident/summary"),
++                        A2UIContextRef("customerImpact", path = "/incident/customerImpact"),
++                    ),
++                ),
++                checks = listOf(A2UICheck(A2UICondition.Required("/incident/summary"), "증상 요약을 입력해야 생성할 수 있어요."))),
++        ),
++        dataModel = mutableMapOf(
++            "incident" to mutableMapOf(
++                "severity" to "P2",
++                "service" to "order-service",
++                "summary" to "",
++                "customerImpact" to false,
++            )
++        ),
++    )
++
++    // ─────────────────────────────────────────────────────────
++    // 2. Deploy Approval Panel
++    // ─────────────────────────────────────────────────────────
++    fun deploySurface(): A2UISurface = A2UISurface(
++        surfaceId = "deploy_panel_${System.currentTimeMillis()}",
++        primaryColor = Color(0xFF1F8A5B),
++        agentDisplayName = "Deploy Bot",
++        components = mapOf(
++            "root" to A2UIComponent.Card("root", "col"),
++            "col" to A2UIComponent.Column("col",
++                children = listOf("title", "sub", "canary_slider", "canary_txt", "div", "health_check", "btn_row")),
++            "title" to A2UIComponent.TextComp("title", A2UIValue.Static("카나리 배포 승인"), "h2"),
++            "sub" to A2UIComponent.TextComp("sub", A2UIValue.Static("payment-service · v2.4.1 → production"), "caption"),
++            "canary_slider" to A2UIComponent.SliderComp("canary_slider",
++                label = "카나리 트래픽 비중", valuePath = "/deploy/canary",
++                min = 0f, max = 100f, step = 5f),
++            "canary_txt" to A2UIComponent.TextComp("canary_txt",
++                A2UIValue.FormatStr("신버전으로 **\${/deploy/canary}%** 의 트래픽을 전환합니다."), "body"),
++            "div" to A2UIComponent.Divider("div"),
++            "health_check" to A2UIComponent.CheckBoxComp("health_check",
++                label = "스테이징 헬스체크 통과를 확인했습니다", valuePath = "/deploy/healthOk"),
++            "btn_row" to A2UIComponent.Row("btn_row",
++                children = listOf("cancel_btn", "deploy_btn"), justify = "spaceBetween"),
++            "cancel_btn" to A2UIComponent.ButtonComp("cancel_btn",
++                label = A2UIValue.Static("취소"), variant = "borderless",
++                action = A2UIAction("cancel_deploy")),
++            "deploy_btn" to A2UIComponent.ButtonComp("deploy_btn",
++                label = A2UIValue.Static("배포 시작"), variant = "primary",
++                action = A2UIAction(
++                    eventName = "start_deploy",
++                    contextRefs = listOf(
++                        A2UIContextRef("canary", path = "/deploy/canary"),
++                        A2UIContextRef("healthOk", path = "/deploy/healthOk"),
++                    ),
++                    extraLiterals = mapOf("service" to "payment-service", "version" to "v2.4.1"),
++                ),
++                checks = listOf(A2UICheck(
++                    A2UICondition.And(listOf(
++                        A2UICondition.PathRef("/deploy/healthOk"),
++                        A2UICondition.Numeric("/deploy/canary", min = 1.0),
++                    )),
++                    "헬스체크를 확인하고 카나리 비중을 1% 이상으로 설정하세요.",
++                ))),
++        ),
++        dataModel = mutableMapOf(
++            "deploy" to mutableMapOf("canary" to 10, "healthOk" to false)
++        ),
++    )
++
++    // ─────────────────────────────────────────────────────────
++    // 3. Service Status Card
++    // ─────────────────────────────────────────────────────────
++    fun statusSurface(): A2UISurface = A2UISurface(
++        surfaceId = "status_card_${System.currentTimeMillis()}",
++        primaryColor = Color(0xFF2A6FDB),
++        agentDisplayName = "Observability Bot",
++        components = mapOf(
++            "root" to A2UIComponent.Card("root", "col"),
++            "col" to A2UIComponent.Column("col",
++                children = listOf("hdr", "range_pick", "div", "metrics_row", "refresh_btn")),
++            "hdr" to A2UIComponent.Row("hdr", children = listOf("hdr_ico", "hdr_txt"), align = "center"),
++            "hdr_ico" to A2UIComponent.IconComp("hdr_ico", "activity", 19),
++            "hdr_txt" to A2UIComponent.TextComp("hdr_txt", A2UIValue.Static("payment-service 상태"), "h2"),
++            "range_pick" to A2UIComponent.ChoicePickerComp("range_pick",
++                options = listOf(
++                    A2UIOption("15분", "15m"),
++                    A2UIOption("1시간", "1h"),
++                    A2UIOption("24시간", "24h"),
++                ),
++                valuePath = "/status/range"),
++            "div" to A2UIComponent.Divider("div"),
++            "metrics_row" to A2UIComponent.Row("metrics_row",
++                children = listOf("m1", "m2", "m3"), justify = "spaceBetween"),
++            "m1" to A2UIComponent.Column("m1", children = listOf("m1_v", "m1_l")),
++            "m1_v" to A2UIComponent.TextComp("m1_v", A2UIValue.FormatStr("\${/status/p99}ms"), "h1"),
++            "m1_l" to A2UIComponent.TextComp("m1_l", A2UIValue.Static("p99 지연"), "caption"),
++            "m2" to A2UIComponent.Column("m2", children = listOf("m2_v", "m2_l")),
++            "m2_v" to A2UIComponent.TextComp("m2_v", A2UIValue.FormatStr("\${/status/errorRate}%"), "h1"),
++            "m2_l" to A2UIComponent.TextComp("m2_l", A2UIValue.Static("에러율"), "caption"),
++            "m3" to A2UIComponent.Column("m3", children = listOf("m3_v", "m3_l")),
++            "m3_v" to A2UIComponent.TextComp("m3_v", A2UIValue.PathBound("/status/rps"), "h1"),
++            "m3_l" to A2UIComponent.TextComp("m3_l", A2UIValue.Static("RPS"), "caption"),
++            "refresh_btn" to A2UIComponent.ButtonComp("refresh_btn",
++                label = A2UIValue.Static("새로고침"), variant = "secondary",
++                action = A2UIAction(
++                    eventName = "refresh_status",
++                    contextRefs = listOf(A2UIContextRef("range", path = "/status/range")),
++                )),
++        ),
++        dataModel = mutableMapOf(
++            "status" to mutableMapOf(
++                "range" to "1h",
++                "p99" to 842,
++                "errorRate" to 1.3,
++                "rps" to "2.4k",
++            )
++        ),
++    )
++
++    // ─────────────────────────────────────────────────────────
++    // 4. Risk Assessment Input Form
++    // ─────────────────────────────────────────────────────────
++    fun riskSurface(): A2UISurface = A2UISurface(
++        surfaceId = "risk_form_${System.currentTimeMillis()}",
++        primaryColor = Color(0xFF0E7C66),
++        agentDisplayName = "안전 AI",
++        components = mapOf(
++            "root" to A2UIComponent.Card("root", "col"),
++            "col" to A2UIComponent.Column("col",
++                children = listOf("hdr", "trades_in", "loc_sel", "equip_in", "count_sel", "submit_btn")),
++            "hdr" to A2UIComponent.TextComp("hdr", A2UIValue.Static("위험성평가 자동 생성"), "h2"),
++            "trades_in" to A2UIComponent.TagInputComp("trades_in",
++                label = "공종 선택", valuePath = "/risk/trades",
++                suggestions = listOf("배관", "용접", "비계", "전기", "굴착", "도장"),
++                placeholder = "공종명 직접 입력 후 추가"),
++            "loc_sel" to A2UIComponent.SelectComp("loc_sel",
++                label = "작업 장소", valuePath = "/risk/location",
++                options = listOf(
++                    A2UIOption("일반", "일반"),
++                    A2UIOption("지상", "지상"),
++                    A2UIOption("고소 (2m 이상)", "고소"),
++                    A2UIOption("지하", "지하"),
++                    A2UIOption("밀폐 공간", "밀폐공간"),
++                )),
++            "equip_in" to A2UIComponent.TextFieldComp("equip_in",
++                label = "사용 장비", valuePath = "/risk/equip",
++                placeholder = "예: 크레인, 용접기, 굴착기"),
++            "count_sel" to A2UIComponent.SelectComp("count_sel",
++                label = "공종당 항목 수", valuePath = "/risk/count",
++                options = listOf(
++                    A2UIOption("3개", "3"),
++                    A2UIOption("5개", "5"),
++                    A2UIOption("8개", "8"),
++                    A2UIOption("10개", "10"),
++                )),
++            "submit_btn" to A2UIComponent.ButtonComp("submit_btn",
++                label = A2UIValue.Static("AI 위험성평가 생성"),
++                variant = "primary",
++                action = A2UIAction(
++                    eventName = "generate_risk",
++                    contextRefs = listOf(
++                        A2UIContextRef("trades", path = "/risk/trades"),
++                        A2UIContextRef("count", path = "/risk/count"),
++                        A2UIContextRef("location", path = "/risk/location"),
++                        A2UIContextRef("equip", path = "/risk/equip"),
++                    ),
++                ),
++                checks = listOf(A2UICheck(
++                    A2UICondition.Required("/risk/trades"),
++                    "공종을 1개 이상 선택해야 합니다.",
++                ))),
++        ),
++        dataModel = mutableMapOf(
++            "risk" to mutableMapOf(
++                "trades" to mutableListOf<String>(),
++                "location" to "일반",
++                "equip" to "",
++                "count" to "5",
++            )
++        ),
++    )
++
++    // ─────────────────────────────────────────────────────────
++    // Risk result surface (generated after form submit)
++    // ─────────────────────────────────────────────────────────
++    fun buildRiskResultSurface(trades: List<String>, count: Int): A2UISurface {
++        val rows = buildRiskRows(trades, count)
++        val highCount = rows.count { (it["risk"] as? String) == "상" }
++        return A2UISurface(
++            surfaceId = "risk_result_${System.currentTimeMillis()}",
++            primaryColor = Color(0xFF0E7C66),
++            agentDisplayName = "안전 AI",
++            components = mapOf(
++                "root" to A2UIComponent.Card("root", "col"),
++                "col" to A2UIComponent.Column("col", children = listOf("hdr", "div", "table")),
++                "hdr" to A2UIComponent.TextComp("hdr",
++                    A2UIValue.Static("${trades.size}개 공종 · 총 ${rows.size}건 · 고위험 ${highCount}건"), "caption"),
++                "div" to A2UIComponent.Divider("div"),
++                "table" to A2UIComponent.RiskCardList("table", "/result/rows"),
++            ),
++            dataModel = mutableMapOf(
++                "result" to mutableMapOf("rows" to rows)
++            ),
++            sendDataModel = false,
++        )
++    }
++
++    // ─────────────────────────────────────────────────────────
++    // Sample risk row generator
++    // ─────────────────────────────────────────────────────────
++    private val HAZARD_DB: Map<String, List<Map<String, String>>> = mapOf(
++        "배관" to listOf(
++            mapOf("task" to "배관 자재 인양·운반", "cause" to "중량물 수동 취급으로 인한 근골격계 손상", "current" to "2인 1조 운반 기준", "improve" to "운반 보조기구(대차) 사용, 기계화 검토", "poss" to "중", "sev" to "하", "risk" to "하"),
++            mapOf("task" to "배관 용접 연결 작업", "cause" to "용접 화재·폭발 및 유해가스 흡입", "current" to "소화기 배치", "improve" to "화기작업 허가서 발행 및 환기 강화", "poss" to "중", "sev" to "중", "risk" to "중"),
++            mapOf("task" to "고압 배관 압력 시험", "cause" to "과압으로 인한 배관 파열·비산", "current" to "압력계 설치", "improve" to "안전밸브 설치 및 작업 반경 내 출입 통제", "poss" to "하", "sev" to "상", "risk" to "중"),
++            mapOf("task" to "배관 지지대 설치", "cause" to "고소 작업 중 추락", "current" to "안전대 착용 기준", "improve" to "작업발판 설치 및 안전대 체결점 확보", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "배관 보온재 시공", "cause" to "보온재 분진 흡입 및 피부 자극", "current" to "마스크 착용", "improve" to "방진마스크(1급) 및 보호의 지급", "poss" to "중", "sev" to "하", "risk" to "하"),
++        ),
++        "용접" to listOf(
++            mapOf("task" to "아크 용접 작업", "cause" to "아크광에 의한 눈 손상 및 용접 흄 흡입", "current" to "보호면 착용 기준", "improve" to "환기장치 설치 및 방독마스크 지급", "poss" to "중", "sev" to "중", "risk" to "중"),
++            mapOf("task" to "가스 절단 작업", "cause" to "가스 누출 및 역화 폭발 위험", "current" to "밸브 잠금 절차 운영", "improve" to "가스 검지기 상시 운영 및 역화 방지기 부착", "poss" to "하", "sev" to "상", "risk" to "중"),
++            mapOf("task" to "밀폐 공간 용접", "cause" to "산소 결핍 및 유해가스 축적", "current" to "환기팬 운영", "improve" to "밀폐공간 작업 허가 및 산소 농도 연속 감시", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "용접 후처리 그라인딩", "cause" to "연삭 파편 비산으로 인한 눈·피부 손상", "current" to "보안경 착용", "improve" to "방진 마스크 및 안면 보호구 착용 의무화", "poss" to "상", "sev" to "중", "risk" to "상"),
++            mapOf("task" to "전기 저항 용접", "cause" to "감전 및 전기 화재", "current" to "절연 장갑 착용", "improve" to "접지 확인 및 누전 차단기 설치", "poss" to "하", "sev" to "상", "risk" to "중"),
++        ),
++        "비계" to listOf(
++            mapOf("task" to "비계 설치·해체 작업", "cause" to "고소 작업 중 추락·낙하", "current" to "안전대 착용 기준", "improve" to "안전대 체결지점 확보 및 추락 방호망 설치", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "비계 자재 인양", "cause" to "자재 낙하로 인한 하부 작업자 충격", "current" to "낙하물 방지망 설치", "improve" to "하부 출입 통제 구역 설정 및 안전모 착용", "poss" to "중", "sev" to "중", "risk" to "중"),
++            mapOf("task" to "비계 이동·조립", "cause" to "비계 전도 위험", "current" to "아웃트리거 전개 기준", "improve" to "지반 강도 확인 및 고정 볼트 체결 점검", "poss" to "하", "sev" to "상", "risk" to "중"),
++            mapOf("task" to "작업 발판 설치", "cause" to "발판 이탈로 인한 추락", "current" to "발판 고정 기준", "improve" to "발판 걸림 장치 점검 및 안전난간 설치", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "비계 위 자재 보관", "cause" to "과하중으로 인한 비계 붕괴", "current" to "최대 하중 표시", "improve" to "하중 계산서 작성 및 허용 하중 초과 금지 교육", "poss" to "하", "sev" to "상", "risk" to "중"),
++        ),
++        "전기" to listOf(
++            mapOf("task" to "전기 배선 연결 작업", "cause" to "활선 접촉으로 인한 감전", "current" to "차단기 OFF 후 작업", "improve" to "LOTO(잠금·표지) 절차 적용", "poss" to "하", "sev" to "상", "risk" to "중"),
++            mapOf("task" to "전기 기기 설치·교체", "cause" to "절연 불량으로 인한 감전·화재", "current" to "절연 장갑 착용", "improve" to "절연 저항 측정 및 누전 차단기 설치", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "케이블 트레이 배선", "cause" to "고소 작업 중 추락", "current" to "안전대 착용 기준", "improve" to "작업 발판 설치 및 안전대 체결", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "전동 공구 사용", "cause" to "스파크로 인한 화재 또는 감전", "current" to "접지된 공구 사용", "improve" to "방폭형 공구 사용 및 정기 점검", "poss" to "하", "sev" to "중", "risk" to "하"),
++            mapOf("task" to "외함 접지 작업", "cause" to "접지 불량으로 인한 감전", "current" to "접지 저항 측정", "improve" to "제3종 접지 기준 준수 및 기록 관리", "poss" to "하", "sev" to "상", "risk" to "중"),
++        ),
++        "굴착" to listOf(
++            mapOf("task" to "터파기 굴착 작업", "cause" to "토사 붕괴로 인한 매몰", "current" to "경사면 유지 기준 적용", "improve" to "흙막이 설치 및 지하수 수위 모니터링", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "굴착기 운용", "cause" to "굴착기 전도·충돌 위험", "current" to "작업 반경 내 출입 금지", "improve" to "유도원 배치 및 후진 경보 장치 부착", "poss" to "중", "sev" to "중", "risk" to "중"),
++            mapOf("task" to "지하 매설물 굴착", "cause" to "가스·전기 매설물 손상으로 인한 폭발·감전", "current" to "매설물 도면 확인", "improve" to "매설물 탐지기 사용 및 관계기관 입회", "poss" to "하", "sev" to "상", "risk" to "중"),
++            mapOf("task" to "굴착면 수직 작업", "cause" to "수직 굴착면 붕괴", "current" to "경사면 유지", "improve" to "강재 흙막이 설치 및 계측 관리", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "되메우기 다짐 작업", "cause" to "다짐 장비 하중에 의한 지반 침하", "current" to "다짐 기준 준수", "improve" to "다짐도 확인 시험 실시 및 기록 관리", "poss" to "하", "sev" to "중", "risk" to "하"),
++        ),
++        "도장" to listOf(
++            mapOf("task" to "도료 스프레이 도포", "cause" to "유기 용제 흡입으로 인한 중독", "current" to "방진마스크 착용", "improve" to "방독마스크(유기 증기용) 교체 및 환기 강화", "poss" to "중", "sev" to "중", "risk" to "중"),
++            mapOf("task" to "고소 외벽 도장 작업", "cause" to "작업 중 추락", "current" to "안전대 착용 기준", "improve" to "작업 발판 및 안전대 체결점 확보", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "도료 혼합·희석 작업", "cause" to "인화성 증기 폭발·화재", "current" to "화기 금지 표시", "improve" to "방폭 구역 지정 및 정전기 방지 접지", "poss" to "하", "sev" to "상", "risk" to "중"),
++            mapOf("task" to "도장 건조실 작업", "cause" to "밀폐 공간 유해가스 축적", "current" to "환기팬 운영", "improve" to "산소 농도 측정 및 밀폐공간 출입 허가 운영", "poss" to "중", "sev" to "상", "risk" to "상"),
++            mapOf("task" to "도장 폐기물 처리", "cause" to "유해 폐기물 피부·호흡기 노출", "current" to "보호의 착용", "improve" to "지정 폐기물 처리 절차 준수 및 위탁 처리", "poss" to "하", "sev" to "중", "risk" to "하"),
++        ),
++    )
++
++    private fun buildRiskRows(trades: List<String>, count: Int): List<Map<String, Any?>> =
++        trades.flatMap { trade ->
++            val hazards = HAZARD_DB[trade] ?: listOf(
++                mapOf(
++                    "task" to "$trade 일반 작업",
++                    "cause" to "작업 중 부주의로 인한 안전사고",
++                    "current" to "안전 수칙 준수",
++                    "improve" to "작업 전 TBM(Tool Box Meeting) 실시",
++                    "poss" to "중", "sev" to "중", "risk" to "중",
++                )
++            )
++            hazards.take(count).map { h ->
++                (h + mapOf("trade" to trade)).toMutableMap<String, Any?>()
++            }
++        }
++}
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/domain/model/ChatMessage.kt b/app/src/main/java/com/aromit/geminivoicechat/domain/model/ChatMessage.kt
+index 9a9921c..6628664 100644
+--- a/app/src/main/java/com/aromit/geminivoicechat/domain/model/ChatMessage.kt
++++ b/app/src/main/java/com/aromit/geminivoicechat/domain/model/ChatMessage.kt
+@@ -7,5 +7,6 @@ data class ChatMessage(
+     val text: String,
+     val senderType: SenderType,
+     val timestamp: Long = System.currentTimeMillis(),
+-    val isStreaming: Boolean = false
++    val isStreaming: Boolean = false,
++    val surfaceId: String? = null,
+ )
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatScreen.kt b/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatScreen.kt
+index 616da09..1d0bb59 100644
+--- a/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatScreen.kt
++++ b/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatScreen.kt
+@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
+ import androidx.core.content.ContextCompat
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import androidx.lifecycle.viewmodel.compose.viewModel
++import com.aromit.geminivoicechat.a2ui.A2UISurface
++import com.aromit.geminivoicechat.a2ui.A2UISurfaceView
+ import com.aromit.geminivoicechat.domain.model.ChatMessage
+ import com.aromit.geminivoicechat.domain.model.SenderType
+ import com.aromit.geminivoicechat.ui.voice.VoiceState
+@@ -163,6 +165,9 @@ fun ChatScreen(
+                 playingMessageId = state.playingMessageId,
+                 onTtsToggled = viewModel::onMessageTtsToggled,
+                 listState = listState,
++                surfaces = state.surfaces,
++                onA2UIData = viewModel::onA2UIData,
++                onA2UIAction = viewModel::onA2UIAction,
+                 modifier = Modifier
+                     .weight(1f)
+                     .fillMaxWidth()
+@@ -235,7 +240,10 @@ private fun MessageList(
+     playingMessageId: String?,
+     onTtsToggled: (ChatMessage) -> Unit,
+     listState: LazyListState,
+-    modifier: Modifier = Modifier
++    surfaces: Map<String, A2UISurface>,
++    onA2UIData: (surfaceId: String, path: String, value: Any?) -> Unit,
++    onA2UIAction: (surfaceId: String, eventName: String, context: Map<String, Any?>) -> Unit,
++    modifier: Modifier = Modifier,
+ ) {
+     if (messages.isEmpty()) {
+         EmptyState(modifier = modifier)
+@@ -254,7 +262,10 @@ private fun MessageList(
+                 SenderType.AI -> AiMessage(
+                     message = message,
+                     isPlaying = playingMessageId == message.id,
+-                    onTtsToggled = { onTtsToggled(message) }
++                    onTtsToggled = { onTtsToggled(message) },
++                    surface = surfaces[message.surfaceId],
++                    onA2UIData = onA2UIData,
++                    onA2UIAction = onA2UIAction,
+                 )
+             }
+         }
+@@ -302,7 +313,10 @@ private fun UserMessageBubble(message: ChatMessage) {
+ private fun AiMessage(
+     message: ChatMessage,
+     isPlaying: Boolean,
+-    onTtsToggled: () -> Unit
++    onTtsToggled: () -> Unit,
++    surface: A2UISurface?,
++    onA2UIData: (surfaceId: String, path: String, value: Any?) -> Unit,
++    onA2UIAction: (surfaceId: String, eventName: String, context: Map<String, Any?>) -> Unit,
+ ) {
+     Column(modifier = Modifier.fillMaxWidth()) {
+         Row(
+@@ -334,15 +348,26 @@ private fun AiMessage(
+                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
+             )
+         } else {
+-            MarkdownText(
+-                markdown = message.text,
+-                modifier = Modifier
+-                    .fillMaxWidth()
+-                    .padding(horizontal = 4.dp),
+-                style = MaterialTheme.typography.bodyLarge.copy(
+-                    color = MaterialTheme.colorScheme.onBackground
++            if (message.text.isNotBlank()) {
++                MarkdownText(
++                    markdown = message.text,
++                    modifier = Modifier
++                        .fillMaxWidth()
++                        .padding(horizontal = 4.dp),
++                    style = MaterialTheme.typography.bodyLarge.copy(
++                        color = MaterialTheme.colorScheme.onBackground
++                    )
+                 )
+-            )
++            }
++            if (surface != null) {
++                Spacer(modifier = Modifier.height(8.dp))
++                A2UISurfaceView(
++                    surface = surface,
++                    onData = { path, value -> onA2UIData(surface.surfaceId, path, value) },
++                    onAction = { eventName, context -> onA2UIAction(surface.surfaceId, eventName, context) },
++                    modifier = Modifier.fillMaxWidth(),
++                )
++            }
+         }
+     }
+ }
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatState.kt b/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatState.kt
+index 582b555..4d3acc3 100644
+--- a/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatState.kt
++++ b/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatState.kt
+@@ -1,5 +1,6 @@
+ package com.aromit.geminivoicechat.ui.chat
+ 
++import com.aromit.geminivoicechat.a2ui.A2UISurface
+ import com.aromit.geminivoicechat.domain.model.ChatMessage
+ import com.aromit.geminivoicechat.ui.voice.VoiceState
+ 
+@@ -8,7 +9,8 @@ data class ChatState(
+     val inputText: String = "",
+     val isAiResponding: Boolean = false,
+     val voice: VoiceState = VoiceState(),
+-    val playingMessageId: String? = null
++    val playingMessageId: String? = null,
++    val surfaces: Map<String, A2UISurface> = emptyMap(),
+ ) {
+     val isSendEnabled: Boolean
+         get() = inputText.isNotBlank() && !isAiResponding
+diff --git a/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatViewModel.kt b/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatViewModel.kt
+index c7e1e87..6c19d32 100644
+--- a/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatViewModel.kt
++++ b/app/src/main/java/com/aromit/geminivoicechat/ui/chat/ChatViewModel.kt
+@@ -4,6 +4,10 @@ import android.util.Log
+ import androidx.lifecycle.ViewModel
+ import androidx.lifecycle.ViewModelProvider
+ import androidx.lifecycle.viewModelScope
++import com.aromit.geminivoicechat.a2ui.A2UISurface
++import com.aromit.geminivoicechat.a2ui.A2UIScenarios
++import com.aromit.geminivoicechat.a2ui.deepCopyModel
++import com.aromit.geminivoicechat.a2ui.setAtPath
+ import com.aromit.geminivoicechat.domain.model.ChatMessage
+ import com.aromit.geminivoicechat.domain.model.SenderType
+ import com.aromit.geminivoicechat.domain.repository.AiRepository
+@@ -156,15 +160,32 @@ class ChatViewModel(
+ 
+     private fun submitUserPrompt(prompt: String) {
+         val userMessage = ChatMessage(text = prompt, senderType = SenderType.USER)
+-        val aiPlaceholder = ChatMessage(
+-            text = "",
+-            senderType = SenderType.AI,
+-            isStreaming = true
+-        )
++
++        // A2UI 키워드 매칭 — 매칭되면 로컬 시나리오 응답
++        val scenario = A2UIScenarios.match(prompt)
++        if (scenario != null) {
++            val surface = scenario.surface()
++            val aiMsg = ChatMessage(
++                text = scenario.replyMd,
++                senderType = SenderType.AI,
++                isStreaming = false,
++                surfaceId = surface.surfaceId,
++            )
++            _state.update {
++                it.copy(
++                    messages = it.messages + userMessage + aiMsg,
++                    surfaces = it.surfaces + (surface.surfaceId to surface),
++                )
++            }
++            return
++        }
++
++        // 일반 메시지 → 서버 스트리밍
++        val aiPlaceholder = ChatMessage(text = "", senderType = SenderType.AI, isStreaming = true)
+         _state.update {
+             it.copy(
+                 messages = it.messages + userMessage + aiPlaceholder,
+-                isAiResponding = true
++                isAiResponding = true,
+             )
+         }
+         viewModelScope.launch {
+@@ -197,7 +218,83 @@ class ChatViewModel(
+                 messages = current.messages.map { msg ->
+                     if (msg.id == messageId) msg.copy(isStreaming = false) else msg
+                 },
+-                isAiResponding = false
++                isAiResponding = false,
++            )
++        }
++    }
++
++    // ---------- A2UI 이벤트 처리 ----------
++
++    fun onA2UIData(surfaceId: String, path: String, value: Any?) {
++        _state.update { state ->
++            val surface = state.surfaces[surfaceId] ?: return@update state
++            val newModel = deepCopyModel(surface.dataModel)
++            setAtPath(newModel, path, value)
++            val newSurface = surface.copy(dataModel = newModel)
++            state.copy(surfaces = state.surfaces + (surfaceId to newSurface))
++        }
++    }
++
++    fun onA2UIAction(surfaceId: String, eventName: String, context: Map<String, Any?>) {
++        Log.i(TAG, "A2UI action: $eventName  surface=$surfaceId  ctx=$context")
++        when (eventName) {
++            "create_incident" -> {
++                val id = 1000 + (Math.random() * 9000).toInt()
++                val service = context["service"]?.toString() ?: "-"
++                val severity = context["severity"]?.toString() ?: "-"
++                val summary = context["summary"]?.toString() ?: ""
++                val impact = context["customerImpact"] as? Boolean ?: false
++                addAiReply(
++                    "✅ **인시던트가 생성되었습니다.** `INC-$id`\n\n" +
++                    "- 서비스: `$service`\n- 심각도: **$severity**\n- 고객 영향: ${if (impact) "있음" else "없음"}\n\n> $summary\n\n온콜 담당자에게 페이지를 발송했어요."
++                )
++            }
++            "start_deploy" -> {
++                val canary = context["canary"]?.toString() ?: "?"
++                val service = context["service"]?.toString() ?: "서비스"
++                val version = context["version"]?.toString() ?: ""
++                addAiReply(
++                    "🚀 **배포를 시작했습니다.** `$service $version`\n\n" +
++                    "카나리 트래픽 **${canary}%** 로 롤아웃 중입니다. p99 와 에러율을 모니터링하다가 임계값 초과 시 자동 롤백돼요."
++                )
++            }
++            "cancel_deploy" -> {
++                addAiReply("배포를 취소했어요. 변경 사항은 적용되지 않았습니다.")
++            }
++            "refresh_status" -> {
++                val range = context["range"]?.toString() ?: "1h"
++                addAiReply("🔄 `$range` 기준으로 지표를 다시 조회했어요. 위 카드의 값이 갱신되었습니다.")
++            }
++            "generate_risk" -> {
++                @Suppress("UNCHECKED_CAST")
++                val trades = (context["trades"] as? List<String>) ?: emptyList()
++                val count = context["count"]?.toString()?.toIntOrNull() ?: 5
++                val location = context["location"]?.toString() ?: "일반"
++                if (trades.isEmpty()) {
++                    addAiReply("공종을 1개 이상 선택해 주세요.")
++                    return
++                }
++                val resultSurface = A2UIScenarios.buildRiskResultSurface(trades, count)
++                val replyText = "**${trades.size}개 공종** (${trades.joinToString(", ")}) · " +
++                    "${location} · ${count}개/공종 기준으로 위험성평가를 생성했어요. 검토 후 수정하여 활용하세요."
++                addAiReplyWithSurface(replyText, resultSurface)
++            }
++            else -> addAiReply("`$eventName` 액션을 접수했어요.")
++        }
++    }
++
++    private fun addAiReply(text: String) {
++        _state.update {
++            it.copy(messages = it.messages + ChatMessage(text = text, senderType = SenderType.AI))
++        }
++    }
++
++    private fun addAiReplyWithSurface(text: String, surface: A2UISurface) {
++        val msg = ChatMessage(text = text, senderType = SenderType.AI, surfaceId = surface.surfaceId)
++        _state.update {
++            it.copy(
++                messages = it.messages + msg,
++                surfaces = it.surfaces + (surface.surfaceId to surface),
+             )
+         }
+     }
+-- 
+2.43.0
+

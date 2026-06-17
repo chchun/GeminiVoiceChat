@@ -1,5 +1,6 @@
 package com.aromit.geminivoicechat.ui.chat
 
+import com.aromit.geminivoicechat.a2ui.A2UISurface
 import com.aromit.geminivoicechat.domain.model.ChatMessage
 import com.aromit.geminivoicechat.ui.voice.VoiceState
 
@@ -8,7 +9,8 @@ data class ChatState(
     val inputText: String = "",
     val isAiResponding: Boolean = false,
     val voice: VoiceState = VoiceState(),
-    val playingMessageId: String? = null
+    val playingMessageId: String? = null,
+    val surfaces: Map<String, A2UISurface> = emptyMap(),
 ) {
     val isSendEnabled: Boolean
         get() = inputText.isNotBlank() && !isAiResponding

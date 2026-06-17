@@ -4,6 +4,10 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aromit.geminivoicechat.a2ui.A2UISurface
+import com.aromit.geminivoicechat.a2ui.A2UIScenarios
+import com.aromit.geminivoicechat.a2ui.deepCopyModel
+import com.aromit.geminivoicechat.a2ui.setAtPath
 import com.aromit.geminivoicechat.domain.model.ChatMessage
 import com.aromit.geminivoicechat.domain.model.SenderType
 import com.aromit.geminivoicechat.domain.repository.AiRepository
@@ -156,15 +160,32 @@ class ChatViewModel(
 
     private fun submitUserPrompt(prompt: String) {
         val userMessage = ChatMessage(text = prompt, senderType = SenderType.USER)
-        val aiPlaceholder = ChatMessage(
-            text = "",
-            senderType = SenderType.AI,
-            isStreaming = true
-        )
+
+        // A2UI 키워드 매칭 — 매칭되면 로컬 시나리오 응답
+        val scenario = A2UIScenarios.match(prompt)
+        if (scenario != null) {
+            val surface = scenario.surface()
+            val aiMsg = ChatMessage(
+                text = scenario.replyMd,
+                senderType = SenderType.AI,
+                isStreaming = false,
+                surfaceId = surface.surfaceId,
+            )
+            _state.update {
+                it.copy(
+                    messages = it.messages + userMessage + aiMsg,
+                    surfaces = it.surfaces + (surface.surfaceId to surface),
+                )
+            }
+            return
+        }
+
+        // 일반 메시지 → 서버 스트리밍
+        val aiPlaceholder = ChatMessage(text = "", senderType = SenderType.AI, isStreaming = true)
         _state.update {
             it.copy(
                 messages = it.messages + userMessage + aiPlaceholder,
-                isAiResponding = true
+                isAiResponding = true,
             )
         }
         viewModelScope.launch {
@@ -197,7 +218,83 @@ class ChatViewModel(
                 messages = current.messages.map { msg ->
                     if (msg.id == messageId) msg.copy(isStreaming = false) else msg
                 },
-                isAiResponding = false
+                isAiResponding = false,
+            )
+        }
+    }
+
+    // ---------- A2UI 이벤트 처리 ----------
+
+    fun onA2UIData(surfaceId: String, path: String, value: Any?) {
+        _state.update { state ->
+            val surface = state.surfaces[surfaceId] ?: return@update state
+            val newModel = deepCopyModel(surface.dataModel)
+            setAtPath(newModel, path, value)
+            val newSurface = surface.copy(dataModel = newModel)
+            state.copy(surfaces = state.surfaces + (surfaceId to newSurface))
+        }
+    }
+
+    fun onA2UIAction(surfaceId: String, eventName: String, context: Map<String, Any?>) {
+        Log.i(TAG, "A2UI action: $eventName  surface=$surfaceId  ctx=$context")
+        when (eventName) {
+            "create_incident" -> {
+                val id = 1000 + (Math.random() * 9000).toInt()
+                val service = context["service"]?.toString() ?: "-"
+                val severity = context["severity"]?.toString() ?: "-"
+                val summary = context["summary"]?.toString() ?: ""
+                val impact = context["customerImpact"] as? Boolean ?: false
+                addAiReply(
+                    "✅ **인시던트가 생성되었습니다.** `INC-$id`\n\n" +
+                    "- 서비스: `$service`\n- 심각도: **$severity**\n- 고객 영향: ${if (impact) "있음" else "없음"}\n\n> $summary\n\n온콜 담당자에게 페이지를 발송했어요."
+                )
+            }
+            "start_deploy" -> {
+                val canary = context["canary"]?.toString() ?: "?"
+                val service = context["service"]?.toString() ?: "서비스"
+                val version = context["version"]?.toString() ?: ""
+                addAiReply(
+                    "🚀 **배포를 시작했습니다.** `$service $version`\n\n" +
+                    "카나리 트래픽 **${canary}%** 로 롤아웃 중입니다. p99 와 에러율을 모니터링하다가 임계값 초과 시 자동 롤백돼요."
+                )
+            }
+            "cancel_deploy" -> {
+                addAiReply("배포를 취소했어요. 변경 사항은 적용되지 않았습니다.")
+            }
+            "refresh_status" -> {
+                val range = context["range"]?.toString() ?: "1h"
+                addAiReply("🔄 `$range` 기준으로 지표를 다시 조회했어요. 위 카드의 값이 갱신되었습니다.")
+            }
+            "generate_risk" -> {
+                @Suppress("UNCHECKED_CAST")
+                val trades = (context["trades"] as? List<String>) ?: emptyList()
+                val count = context["count"]?.toString()?.toIntOrNull() ?: 5
+                val location = context["location"]?.toString() ?: "일반"
+                if (trades.isEmpty()) {
+                    addAiReply("공종을 1개 이상 선택해 주세요.")
+                    return
+                }
+                val resultSurface = A2UIScenarios.buildRiskResultSurface(trades, count)
+                val replyText = "**${trades.size}개 공종** (${trades.joinToString(", ")}) · " +
+                    "${location} · ${count}개/공종 기준으로 위험성평가를 생성했어요. 검토 후 수정하여 활용하세요."
+                addAiReplyWithSurface(replyText, resultSurface)
+            }
+            else -> addAiReply("`$eventName` 액션을 접수했어요.")
+        }
+    }
+
+    private fun addAiReply(text: String) {
+        _state.update {
+            it.copy(messages = it.messages + ChatMessage(text = text, senderType = SenderType.AI))
+        }
+    }
+
+    private fun addAiReplyWithSurface(text: String, surface: A2UISurface) {
+        val msg = ChatMessage(text = text, senderType = SenderType.AI, surfaceId = surface.surfaceId)
+        _state.update {
+            it.copy(
+                messages = it.messages + msg,
+                surfaces = it.surfaces + (surface.surfaceId to surface),
             )
         }
     }

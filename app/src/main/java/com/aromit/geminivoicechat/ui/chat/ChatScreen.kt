@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.aromit.geminivoicechat.a2ui.A2UISurface
+import com.aromit.geminivoicechat.a2ui.A2UISurfaceView
 import com.aromit.geminivoicechat.domain.model.ChatMessage
 import com.aromit.geminivoicechat.domain.model.SenderType
 import com.aromit.geminivoicechat.ui.voice.VoiceState
@@ -138,7 +140,7 @@ fun ChatScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Gemini Voice Chat") },
+                title = { Text("Saferyn Agent") },
                 actions = {
                     AnimatedVisibility(visible = state.isVoiceInputActive) {
                         VoiceActiveIndicator()
@@ -163,6 +165,9 @@ fun ChatScreen(
                 playingMessageId = state.playingMessageId,
                 onTtsToggled = viewModel::onMessageTtsToggled,
                 listState = listState,
+                surfaces = state.surfaces,
+                onA2UIData = viewModel::onA2UIData,
+                onA2UIAction = viewModel::onA2UIAction,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -235,7 +240,10 @@ private fun MessageList(
     playingMessageId: String?,
     onTtsToggled: (ChatMessage) -> Unit,
     listState: LazyListState,
-    modifier: Modifier = Modifier
+    surfaces: Map<String, A2UISurface>,
+    onA2UIData: (surfaceId: String, path: String, value: Any?) -> Unit,
+    onA2UIAction: (surfaceId: String, eventName: String, context: Map<String, Any?>) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     if (messages.isEmpty()) {
         EmptyState(modifier = modifier)
@@ -254,7 +262,10 @@ private fun MessageList(
                 SenderType.AI -> AiMessage(
                     message = message,
                     isPlaying = playingMessageId == message.id,
-                    onTtsToggled = { onTtsToggled(message) }
+                    onTtsToggled = { onTtsToggled(message) },
+                    surface = surfaces[message.surfaceId],
+                    onA2UIData = onA2UIData,
+                    onA2UIAction = onA2UIAction,
                 )
             }
         }
@@ -302,7 +313,10 @@ private fun UserMessageBubble(message: ChatMessage) {
 private fun AiMessage(
     message: ChatMessage,
     isPlaying: Boolean,
-    onTtsToggled: () -> Unit
+    onTtsToggled: () -> Unit,
+    surface: A2UISurface?,
+    onA2UIData: (surfaceId: String, path: String, value: Any?) -> Unit,
+    onA2UIAction: (surfaceId: String, eventName: String, context: Map<String, Any?>) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -334,15 +348,26 @@ private fun AiMessage(
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
             )
         } else {
-            MarkdownText(
-                markdown = message.text,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onBackground
+            if (message.text.isNotBlank()) {
+                MarkdownText(
+                    markdown = message.text,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
                 )
-            )
+            }
+            if (surface != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                A2UISurfaceView(
+                    surface = surface,
+                    onData = { path, value -> onA2UIData(surface.surfaceId, path, value) },
+                    onAction = { eventName, context -> onA2UIAction(surface.surfaceId, eventName, context) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

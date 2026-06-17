@@ -7,5 +7,6 @@ data class ChatMessage(
     val text: String,
     val senderType: SenderType,
     val timestamp: Long = System.currentTimeMillis(),
-    val isStreaming: Boolean = false
+    val isStreaming: Boolean = false,
+    val surfaceId: String? = null,
 )

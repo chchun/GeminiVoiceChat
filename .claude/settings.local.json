@@ -6,7 +6,14 @@
       "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; $env:Path = \"$env:JAVA_HOME\\\\bin;$env:Path\"; .\\\\gradlew.bat assembleDebug --console=plain 2>&1 | Select-Object -Last 200)",
       "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; $env:Path = \"$env:JAVA_HOME\\\\bin;$env:Path\"; .\\\\gradlew.bat assembleDebug --console=plain 2>&1 | Select-Object -Last 80)",
       "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; $env:Path = \"$env:JAVA_HOME\\\\bin;$env:Path\"; .\\\\gradlew.bat assembleDebug --console=plain 2>&1 | Select-Object -Last 40)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(./gradlew assembleDebug *)",
+      "Bash(./gradlew installDebug *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git tag *)",
+      "Bash(JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" ./gradlew assembleDebug)"
     ]
   }
 }
