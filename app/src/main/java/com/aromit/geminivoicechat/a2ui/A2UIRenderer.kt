@@ -1,5 +1,8 @@
 package com.aromit.geminivoicechat.a2ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -55,13 +58,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun A2UISurfaceView(
@@ -144,7 +152,18 @@ fun A2UINode(
                 },
             ) {
                 component.children.forEach { childId ->
-                    A2UINode(childId, surface, onData, onAction)
+                    // 입력형 자식은 fillMaxWidth 를 쓰므로 Row 안에서는 균등 분배해야
+                    // 첫 필드가 전체 폭을 차지하지 않는다 (서버 폼의 2필드 Row 대응)
+                    val childModifier = when (surface.components[childId]) {
+                        is A2UIComponent.TextFieldComp,
+                        is A2UIComponent.SelectComp,
+                        is A2UIComponent.TagInputComp,
+                        is A2UIComponent.SliderComp,
+                        -> Modifier.weight(1f)
+
+                        else -> Modifier
+                    }
+                    A2UINode(childId, surface, onData, onAction, modifier = childModifier)
                 }
             }
         }
@@ -247,6 +266,7 @@ fun A2UINode(
                 onValueChange = { onData(component.valuePath, it) },
                 label = { Text(component.label) },
                 placeholder = { Text(component.placeholder) },
+                enabled = !component.readonly,
                 maxLines = if (component.variant == "longText") 5 else 1,
                 minLines = if (component.variant == "longText") 3 else 1,
                 modifier = modifier.fillMaxWidth(),
@@ -474,7 +494,116 @@ fun A2UINode(
                 }
             }
         }
+
+        is A2UIComponent.FileUploadComp -> {
+            @Suppress("UNCHECKED_CAST")
+            val picked = (getAtPath(model, component.valuePath) as? List<*>)
+                ?.filterIsInstance<A2UIPickedFile>() ?: emptyList()
+            val context = LocalContext.current
+            val scope = rememberCoroutineScope()
+            var errorText by remember { mutableStateOf<String?>(null) }
+
+            val pickerLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.PickMultipleVisualMedia(
+                    maxItems = component.maxFiles.coerceAtLeast(2),
+                ),
+            ) { uris ->
+                if (uris.isNotEmpty()) {
+                    scope.launch {
+                        val (files, error) = withContext(Dispatchers.IO) {
+                            readPickedFiles(context, uris, component)
+                        }
+                        errorText = error
+                        if (files.isNotEmpty()) {
+                            onData(component.valuePath, (picked + files).take(component.maxFiles))
+                        }
+                    }
+                }
+            }
+
+            Column(modifier = modifier.fillMaxWidth()) {
+                Text(
+                    "${component.label} (${picked.size}/${component.maxFiles})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                picked.forEach { file ->
+                    InputChip(
+                        selected = false,
+                        onClick = { onData(component.valuePath, picked - file) },
+                        label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        trailingIcon = { Icon(Icons.Default.Close, contentDescription = "제거", Modifier.size(16.dp)) },
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        pickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    enabled = picked.size < component.maxFiles,
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("사진 추가")
+                }
+                if (errorText != null) {
+                    Text(
+                        text = errorText!!,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        is A2UIComponent.ServerCard -> {
+            ServerCardNode(component = component, surface = surface, modifier = modifier)
+        }
     }
+}
+
+/** 선택된 URI 들을 읽어 [A2UIPickedFile] 로 변환한다. 크기 초과 파일은 스킵 + 안내 반환. */
+private fun readPickedFiles(
+    context: android.content.Context,
+    uris: List<android.net.Uri>,
+    component: A2UIComponent.FileUploadComp,
+): Pair<List<A2UIPickedFile>, String?> {
+    val maxBytes = component.maxSizeMb * 1024L * 1024L
+    val files = mutableListOf<A2UIPickedFile>()
+    var skipped = 0
+    for (uri in uris) {
+        val resolver = context.contentResolver
+        var name = "photo_${System.currentTimeMillis()}.jpg"
+        var size = -1L
+        resolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (nameIdx >= 0) cursor.getString(nameIdx)?.let { name = it }
+                if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+            }
+        }
+        if (size > maxBytes) {
+            skipped++
+            continue
+        }
+        val bytes = runCatching {
+            resolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null || bytes.size > maxBytes) {
+            skipped++
+            continue
+        }
+        files += A2UIPickedFile(
+            name = name,
+            mimeType = resolver.getType(uri) ?: "image/*",
+            sizeBytes = bytes.size.toLong(),
+            bytes = bytes,
+        )
+    }
+    val error = if (skipped > 0) "${component.maxSizeMb}MB 를 넘거나 읽지 못한 파일 ${skipped}개를 제외했어요." else null
+    return files to error
 }
 
 @Composable

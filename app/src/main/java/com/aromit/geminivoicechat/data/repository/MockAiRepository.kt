@@ -1,12 +1,15 @@
 package com.aromit.geminivoicechat.data.repository
 
+import com.aromit.geminivoicechat.domain.model.A2UIActionResult
+import com.aromit.geminivoicechat.domain.model.A2UIFile
 import com.aromit.geminivoicechat.domain.model.AiResponse
+import com.aromit.geminivoicechat.domain.model.AiStreamEvent
 import com.aromit.geminivoicechat.domain.repository.AiRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.Dispatchers
 
 class MockAiRepository : AiRepository {
 
@@ -20,7 +23,7 @@ class MockAiRepository : AiRepository {
 
     private var responseIndex = 0
 
-    override suspend fun sendMessage(text: String): Flow<String> = flow {
+    override suspend fun sendMessage(text: String): Flow<AiStreamEvent> = flow {
         delay(INITIAL_THINKING_DELAY_MS)
 
         val response = cannedResponses[responseIndex % cannedResponses.size]
@@ -29,15 +32,26 @@ class MockAiRepository : AiRepository {
         val words = response.split(" ")
         for ((index, word) in words.withIndex()) {
             val chunk = if (index == 0) word else " $word"
-            emit(chunk)
+            emit(AiStreamEvent.TextChunk(chunk))
             delay(PER_WORD_DELAY_MS)
         }
     }.flowOn(Dispatchers.IO)
 
-    override fun streamAudio(audioFlow: Flow<ByteArray>): Flow<AiResponse> = flow {
-        // 보이스 모드는 후속 단계에서 구현합니다.
-        // 현재는 텍스트 채팅 흐름에서만 사용하지 않으므로 빈 Flow를 반환합니다.
+    override suspend fun sendA2UIAction(
+        eventName: String,
+        surfaceId: String,
+        context: Map<String, Any?>,
+        files: List<A2UIFile>,
+    ): A2UIActionResult {
+        delay(INITIAL_THINKING_DELAY_MS)
+        val fileNote = if (files.isNotEmpty()) "\n- 첨부 파일: ${files.size}개" else ""
+        return A2UIActionResult(
+            ok = true,
+            markdown = "✅ **(Mock) `$eventName` 처리가 완료되었습니다.**$fileNote\n\n서버 연동 시 실제 등록 결과가 표시됩니다.",
+        )
     }
+
+    override fun streamAudio(audioFlow: Flow<ByteArray>): Flow<AiResponse> = flow {}
 
     companion object {
         private const val INITIAL_THINKING_DELAY_MS = 800L

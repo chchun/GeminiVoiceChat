@@ -373,7 +373,96 @@ fun myNewSurface(): A2UISurface = A2UISurface(
 
 ---
 
-## 8. 서버 연동 확장 (향후)
+## 8. 서버 와이어 계약 (2026-08-14 확정 — specs/001)
+
+> 이 절이 서버 연동의 현행 계약이다. 진실원천: saferyn-langgraph 리포
+> `app/utils/a2ui.py`(빌더) + `app/api/routes.py`(송출). 아래 8-1 이전의
+> "서버 연동 확장 (향후)" 초안은 폐기됐다 (구 GeminiVoiceChatServer NDJSON 형식).
+
+### 8-1. 전송 — SSE (`POST /chat/stream?api_key=...`)
+
+```
+event: token
+data: {"text": "..."}                    ← 텍스트 청크 (마크다운 누적)
+
+event: a2ui
+data: {"version":"v0.9", <엔벨로프 1건>}   ← 아래 3종 중 하나, 한 줄 직렬화
+
+(종료 이벤트 없음 — 스트림이 닫히면 완료. event: error 시 data.message 가 오류 메시지)
+```
+
+### 8-2. A2UI v0.9 엔벨로프 3종 (송출 순서 고정)
+
+```json
+{"version":"v0.9","createSurface":{"surfaceId":"...","catalogId":"...","theme":{"primaryColor":"#RRGGBB"},"sendDataModel":true}}
+{"version":"v0.9","updateComponents":{"surfaceId":"...","components":[{"id":"root","component":"<Kind>","value":{"path":"/<modelKey>"}}]}}
+{"version":"v0.9","updateDataModel":{"surfaceId":"...","path":"/","value":{"<modelKey>":{...summary...},"raw":{...원본 API 응답...}}}}
+```
+
+클라이언트 적용기: `a2ui/A2UIEnvelopeApplier.kt` (누적 적용, 실패 시 로그+무시).
+
+### 8-3. 서버 커스텀 카드 kind 목록 (렌더러: `a2ui/A2UIServerCards.kt`)
+
+| kind | modelKey | 트리거 인텐트 (서버 키워드) |
+|---|---|---|
+| `CompletionGaugeCard` | riskMeasure / checkMeasure | "감소대책 이행율" / "부적합 조치율" |
+| `ActvScoreSummaryCard` | activityScore | "사업장 활동 점수", "활동 점수" |
+| `WeeklyScheduleCard` | weeklySchedule | "주간 일정", "이번 주 일정" |
+| `PendingApprovalListCard` | pendingApprovals | (결재 대기 문서 조회) |
+| `OpertPlanStatusCard` | opertPlan | "작업계획서" |
+| `OpertStopStatusCard` | opertStop | "작업중지" |
+| `AccidentListCard` | accidents | "재해 발생 내역", "사고 현황" (서버 반영 2026-08-14) |
+
+미지원 kind 는 "지원하지 않는 컴포넌트" 폴백 카드로 렌더링된다.
+
+### 8-4. 표준(basic catalog) 컴포넌트 와이어 형식 — 아차사고/안전제안 폼 (서버 `b8356ec`~)
+
+서버의 `build_safety_report_form_a2ui` 는 커스텀 카드가 아니라 **표준 컴포넌트 조합**을
+보낸다. 클라이언트 applier(T110)가 아래 형식을 기존 `A2UIComponent` 로 매핑한다:
+
+```json
+{"id":"root","component":"Card","child":"form"}
+{"id":"form","component":"Column","children":["title","kind",...]}
+{"id":"title","component":"Text","text":"아차사고 등록","variant":"h2"}
+{"id":"kind","component":"ChoicePicker","variant":"mutuallyExclusive","value":{"path":"/report/kind"},"options":[{"label":..,"value":..}]}
+{"id":"receipt_dt","component":"TextField","label":"청취일시","variant":"datetime","value":{"path":"/report/receiptDateTime"},
+ "checks":[{"call":"required","args":{"value":{"path":"/report/receiptDateTime"}},"message":"..."}]}
+{"id":"registrant","component":"TextField","readonly":true, ...}
+{"id":"photos","component":"FileUpload","label":"사진","value":{"path":"/report/photos"},
+ "accept":[".jpg",".gif",".png",".webp"],"maxFiles":5,"maxSizeMb":50}   ← Photo Picker 렌더링 (spec 002 T105)
+{"id":"submit","component":"Button","text":"아차사고 등록","variant":"primary","checks":[...],
+ "action":{"event":{"name":"register_safety_report","context":{"kind":{"path":"/report/kind"}, ...}}}}
+```
+
+주의점 (로컬 데모 형식과의 차이):
+- 타입 필드가 `type` 이 아니라 `component`, 값 바인딩은 `value:{path}` 축약형
+- `Text` 는 `text` 직접 문자열, `Button` 은 `text` + `action.event.{name,context}`
+- `checks` 는 `{call:"required"|"numeric", args:{value:{path},min?,max?}, message}` 형태
+- `theme.agentDisplayName` 이 createSurface 의 theme 안에 있음
+- 버튼 액션의 서버 왕복은 §8-5 참조 (specs/002 에서 연동 완료).
+
+### 8-5. 액션 왕복 — `POST /a2ui/action` (specs/002, 계약 확정 2026-08-14)
+
+```
+요청:  POST {서버베이스}/a2ui/action   (Content-Type: multipart/form-data — 파일이 없어도!)
+       action = {"name":"register_safety_report","surfaceId":"safety-report-form","context":{...}}  (JSON 문자열 파트)
+       files  = <첨부 파일들>  (선택, 복수 가능)
+응답:  {"ok": true|false, "result": {...}, "md": "✅ **아차사고 등록이 완료되었습니다.** ..."}
+```
+
+⚠ JSON 바디(`application/json`)로 보내면 서버가 **500** 을 반환한다 — 반드시 multipart
+(개정 2026-08-14, 실기기 검증에서 발견).
+
+- 인증·`X-Tenant-Id`/`X-Bplc-Id` 헤더 **불필요** — 미전송 시 서버가 자체 토큰·상수
+  기본값으로 처리 (운영 전환 시 정책 재확정 필요). api_key 검사 없음.
+- 파일 첨부: 같은 multipart 에 `files` 파트(복수)로 전송 (spec 002 T105). action JSON 의
+  `context.photos` 에는 `[{name}]` 파일명 목록만 실린다 (bytes 는 files 파트에만)
+- 클라이언트 동작: `md` 를 AI 말풍선에 마크다운 렌더링. `ok:true` 면 해당 서피스의
+  제출 버튼(같은 eventName 의 Button)을 "✅ 등록이 완료되었습니다." 텍스트로 치환해
+  중복 등록 방지. 실패(네트워크/HTTP 오류) 시 버튼 유지 → 재시도 가능.
+- `register_safety_report` 만 서버 왕복하며, 로컬 데모 액션(create_incident 등)은 로컬 처리 유지.
+
+## 9. (폐기) 구 서버 연동 초안 — GeminiVoiceChatServer NDJSON
 
 현재는 데모 시나리오만 지원 (로컬 키워드 매칭).
 실제 서버가 A2UI 엔벨로프를 반환하도록 확장하려면:

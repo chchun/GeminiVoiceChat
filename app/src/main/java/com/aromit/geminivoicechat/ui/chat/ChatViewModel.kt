@@ -4,10 +4,16 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.aromit.geminivoicechat.a2ui.A2UIComponent
+import com.aromit.geminivoicechat.a2ui.A2UIEnvelopeApplier
+import com.aromit.geminivoicechat.a2ui.A2UIPickedFile
 import com.aromit.geminivoicechat.a2ui.A2UISurface
 import com.aromit.geminivoicechat.a2ui.A2UIScenarios
+import com.aromit.geminivoicechat.a2ui.A2UIValue
 import com.aromit.geminivoicechat.a2ui.deepCopyModel
 import com.aromit.geminivoicechat.a2ui.setAtPath
+import com.aromit.geminivoicechat.domain.model.A2UIFile
+import com.aromit.geminivoicechat.domain.model.AiStreamEvent
 import com.aromit.geminivoicechat.domain.model.ChatMessage
 import com.aromit.geminivoicechat.domain.model.SenderType
 import com.aromit.geminivoicechat.domain.repository.AiRepository
@@ -160,27 +166,6 @@ class ChatViewModel(
 
     private fun submitUserPrompt(prompt: String) {
         val userMessage = ChatMessage(text = prompt, senderType = SenderType.USER)
-
-        // A2UI 키워드 매칭 — 매칭되면 로컬 시나리오 응답
-        val scenario = A2UIScenarios.match(prompt)
-        if (scenario != null) {
-            val surface = scenario.surface()
-            val aiMsg = ChatMessage(
-                text = scenario.replyMd,
-                senderType = SenderType.AI,
-                isStreaming = false,
-                surfaceId = surface.surfaceId,
-            )
-            _state.update {
-                it.copy(
-                    messages = it.messages + userMessage + aiMsg,
-                    surfaces = it.surfaces + (surface.surfaceId to surface),
-                )
-            }
-            return
-        }
-
-        // 일반 메시지 → 서버 스트리밍
         val aiPlaceholder = ChatMessage(text = "", senderType = SenderType.AI, isStreaming = true)
         _state.update {
             it.copy(
@@ -195,11 +180,33 @@ class ChatViewModel(
 
     private suspend fun streamAiResponse(prompt: String, aiMessageId: String) {
         runCatching {
-            aiRepository.sendMessage(prompt).collect { chunk ->
-                appendChunkToMessage(aiMessageId, chunk)
+            aiRepository.sendMessage(prompt).collect { event ->
+                when (event) {
+                    is AiStreamEvent.TextChunk -> appendChunkToMessage(aiMessageId, event.text)
+                    is AiStreamEvent.A2UIEnvelope -> applyEnvelope(aiMessageId, event.envelopeJson)
+                }
             }
         }
         finalizeMessage(aiMessageId)
+    }
+
+    /** v0.9 엔벨로프 1건을 서피스에 누적 적용하고, 첫 서피스를 메시지에 부착한다. */
+    private fun applyEnvelope(messageId: String, envelopeJson: String) {
+        val surfaceId = A2UIEnvelopeApplier.surfaceIdOf(envelopeJson) ?: return
+        _state.update { current ->
+            val updated = A2UIEnvelopeApplier.apply(current.surfaces[surfaceId], envelopeJson)
+                ?: return@update current
+            current.copy(
+                messages = current.messages.map { msg ->
+                    if (msg.id == messageId && msg.surfaceId == null) {
+                        msg.copy(surfaceId = surfaceId)
+                    } else {
+                        msg
+                    }
+                },
+                surfaces = current.surfaces + (surfaceId to updated),
+            )
+        }
     }
 
     private fun appendChunkToMessage(messageId: String, chunk: String) {
@@ -279,6 +286,9 @@ class ChatViewModel(
                     "${location} · ${count}개/공종 기준으로 위험성평가를 생성했어요. 검토 후 수정하여 활용하세요."
                 addAiReplyWithSurface(replyText, resultSurface)
             }
+            // 서버 폼(아차사고/안전제안) 제출 — /a2ui/action 서버 왕복 (spec 002)
+            "register_safety_report" -> submitActionToServer(surfaceId, eventName, context)
+
             else -> addAiReply("`$eventName` 액션을 접수했어요.")
         }
     }
@@ -286,6 +296,69 @@ class ChatViewModel(
     private fun addAiReply(text: String) {
         _state.update {
             it.copy(messages = it.messages + ChatMessage(text = text, senderType = SenderType.AI))
+        }
+    }
+
+    /**
+     * A2UI 액션을 서버로 전송하고 응답 md 를 표시한다 (spec 002 D4).
+     * 성공 시 해당 서피스의 제출 버튼을 완료 텍스트로 치환해 중복 등록을 막는다 (D3).
+     */
+    private fun submitActionToServer(
+        surfaceId: String,
+        eventName: String,
+        context: Map<String, Any?>,
+    ) {
+        val placeholder = ChatMessage(text = "", senderType = SenderType.AI, isStreaming = true)
+        _state.update { it.copy(messages = it.messages + placeholder) }
+
+        // 첨부 파일(A2UIPickedFile)을 context 에서 분리 — JSON 에는 파일명만, bytes 는
+        // 도메인 A2UIFile 로 multipart files 파트에 실린다 (spec 002 D5)
+        val files = mutableListOf<A2UIFile>()
+        val sanitizedContext = context.mapValues { (_, value) ->
+            if (value is List<*> && value.any { it is A2UIPickedFile }) {
+                val pickedFiles = value.filterIsInstance<A2UIPickedFile>()
+                files += pickedFiles.map { A2UIFile(it.name, it.mimeType, it.bytes) }
+                pickedFiles.map { mapOf("name" to it.name) }
+            } else {
+                value
+            }
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                aiRepository.sendA2UIAction(eventName, surfaceId, sanitizedContext, files)
+            }.onSuccess { result ->
+                appendChunkToMessage(placeholder.id, result.markdown)
+                if (result.ok) markActionCompleted(surfaceId, eventName)
+            }.onFailure { e ->
+                Log.w(TAG, "A2UI action 전송 실패: $eventName", e)
+                appendChunkToMessage(
+                    placeholder.id,
+                    "⚠️ 등록 요청을 보내지 못했어요 (${e.message}). 폼의 등록 버튼으로 다시 시도해 주세요.",
+                )
+            }
+            finalizeMessage(placeholder.id)
+        }
+    }
+
+    /** 서피스에서 같은 eventName 의 제출 버튼을 찾아 완료 텍스트로 치환한다 (spec 002 D3). */
+    private fun markActionCompleted(surfaceId: String, eventName: String) {
+        _state.update { current ->
+            val surface = current.surfaces[surfaceId] ?: return@update current
+            val components = surface.components.mapValues { (_, comp) ->
+                if (comp is A2UIComponent.ButtonComp && comp.action?.eventName == eventName) {
+                    A2UIComponent.TextComp(
+                        id = comp.id,
+                        text = A2UIValue.Static("✅ 등록이 완료되었습니다."),
+                        variant = "caption",
+                    )
+                } else {
+                    comp
+                }
+            }
+            current.copy(
+                surfaces = current.surfaces + (surfaceId to surface.copy(components = components)),
+            )
         }
     }
 

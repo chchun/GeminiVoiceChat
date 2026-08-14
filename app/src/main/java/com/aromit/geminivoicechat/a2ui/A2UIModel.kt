@@ -70,6 +70,7 @@ sealed class A2UIComponent {
         val variant: String = "shortText",
         val placeholder: String = "",
         val checks: List<A2UICheck> = emptyList(),
+        val readonly: Boolean = false,
     ) : A2UIComponent()
     data class CheckBoxComp(override val id: String, val label: String, val valuePath: String) : A2UIComponent()
     data class ChoicePickerComp(
@@ -102,6 +103,44 @@ sealed class A2UIComponent {
         val placeholder: String = "",
     ) : A2UIComponent()
     data class RiskCardList(override val id: String, val rowsPath: String) : A2UIComponent()
+
+    /** 사진 첨부 (spec 002 T105). 선택 결과는 valuePath 에 List<A2UIPickedFile> 로 저장. */
+    data class FileUploadComp(
+        override val id: String,
+        val label: String,
+        val valuePath: String,
+        val accept: List<String> = emptyList(),
+        val maxFiles: Int = 5,
+        val maxSizeMb: Int = 50,
+    ) : A2UIComponent()
+
+    /**
+     * 서버(saferyn-langgraph)가 v0.9 엔벨로프로 내려주는 커스텀 카탈로그 컴포넌트.
+     * kind = 서버의 component 필드 (예: "ActvScoreSummaryCard"),
+     * valuePath = dataModel 안의 summary 객체 위치. 렌더링은 A2UIServerCards.kt.
+     */
+    data class ServerCard(
+        override val id: String,
+        val kind: String,
+        val valuePath: String,
+    ) : A2UIComponent()
+}
+
+/**
+ * FileUpload 로 선택된 사진 1장. bytes 는 선택 직후 UI 계층에서 읽는다 (spec 002 plan D5).
+ * 제출 시 ViewModel 이 도메인 [com.aromit.geminivoicechat.domain.model.A2UIFile] 로 변환하고,
+ * action JSON 의 context 에는 파일명만 남긴다.
+ */
+data class A2UIPickedFile(
+    val name: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val bytes: ByteArray,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is A2UIPickedFile && other.name == name && other.sizeBytes == sizeBytes
+
+    override fun hashCode(): Int = 31 * name.hashCode() + sizeBytes.hashCode()
 }
 
 // ── Surface ──────────────────────────────────────────────────

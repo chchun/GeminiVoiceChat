@@ -80,6 +80,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.compose.markdown)
     testImplementation(libs.junit)
+    // android.jar 의 org.json 스텁("not mocked")을 실제 구현으로 대체 — A2UI 엔벨로프 JVM 테스트용
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -5,6 +5,50 @@
 
 ---
 
+## [1.5.0] - 2026-08-14
+
+A2UI 서버 연동 — 로컬 키워드 데모를 실서버(saferyn-langgraph, ncloud) 스트리밍으로 전환 (specs/001).
+SDD 하네스 도입 (constitution.md / DESIGN.md / specs/ / CLAUDE.md 리팩토링 — 2026-08-13).
+
+### Added
+
+- **`domain/model/AiStreamEvent.kt`** — 스트림 이벤트 sealed class (`TextChunk` | `A2UIEnvelope`).
+  `AiRepository.sendMessage` 반환 타입을 `Flow<String>` → `Flow<AiStreamEvent>` 로 확장.
+- **`a2ui/A2UIEnvelopeApplier.kt`** — A2UI v0.9 엔벨로프 3종(createSurface /
+  updateComponents / updateDataModel) 누적 적용기. 파싱 실패는 로그+무시 (스트림 보호).
+- **`a2ui/A2UIServerCards.kt`** — 서버 커스텀 카드 6종 Compose 렌더러:
+  `CompletionGaugeCard` / `ActvScoreSummaryCard` / `WeeklyScheduleCard` /
+  `PendingApprovalListCard` / `OpertPlanStatusCard` / `OpertStopStatusCard` + 미지원 kind 폴백.
+- **`A2UIEnvelopeApplierTest`** — JVM 단위 테스트 5건 (`org.json:json` 테스트 의존성 추가).
+- SDD 하네스: `constitution.md`(P1~P13) / `DESIGN.md` / `specs/001-a2ui-server-streaming/` /
+  `KICKOFF_PROMPT.md` / `app/docs/guide/sdd_하네스_전환_가이드.md`.
+
+### Added (2026-08-14 후속 — specs/001 T110/T112, specs/002)
+
+- **표준(basic catalog) 컴포넌트 v0.9 와이어 파싱** — 아차사고/안전제안 폼
+  (Card/Column/Row/Text/ChoicePicker/TextField/Button + readonly, Row 균등 분배) 렌더링.
+- **`AccidentListCard`** 렌더러 — 재해 발생 내역 (서버 빌더 반영에 대응).
+- **A2UI 액션 서버 왕복** (specs/002) — `AiRepository.sendA2UIAction` →
+  `POST /a2ui/action` (파일 유무와 무관하게 항상 multipart — JSON 바디는 서버 500).
+  폼 제출 시 실제 등록, 응답 `md` 말풍선 표시, 성공 시 제출 버튼을 완료 텍스트로 치환.
+- **FileUpload 사진 첨부** (specs/002 T105) — Photo Picker(권한 불필요) 선택/제거 칩,
+  maxFiles·maxSizeMb 제한, multipart `files` 파트 전송 (context 에는 파일명만).
+
+### Changed
+
+- **`RemoteAiRepository`** — SSE 라우팅을 data JSON `type` 필드 → **SSE 이벤트명 기준**으로
+  교체 (`token`/`a2ui`/`error`). 실서버 a2ui 엔벨로프가 조용히 버려지던 버그 수정.
+- **`ChatViewModel`** — A2UI 로컬 키워드 매칭 분기 제거 (모든 입력이 서버로),
+  엔벨로프 수신 시 서피스 누적 적용 + 첫 서피스를 메시지에 부착.
+- `app/docs/08_a2ui_generative_ui.md` §8 — 확정 서버 와이어 계약 문서화 (구 초안은 §9 폐기).
+
+### Removed
+
+- GeminiVoiceChatServer NDJSON(`{"type":"a2ui_create"}`) 형식 지원 — 해당 서버 미사용 확정.
+  (`A2UISurfaceParser`/`A2UIScenarios` 는 로컬 데모·픽스처로 존치, 호출 경로만 제거)
+
+---
+
 ## [1.4.0] - 2026-06-17
 
 A2UI v0.9 — AI 에이전트가 채팅 안에서 인터랙티브 UI 서피스를 직접 생성하는 생성형 UI 레이어 추가.
